@@ -36,6 +36,10 @@ class SettingsPatch(BaseModel):
     backend: str | None = None
     laya_model: str | None = None
     samples_per_folder: int | None = None
+    examples_per_category: int | None = None
+    content_per_category: int | None = None
+    gpu_memory_fraction: float | None = None
+    cpu_threads: int | None = None
 
 
 class CategoriesUpdate(BaseModel):
@@ -80,6 +84,8 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         values = patch.model_dump(exclude_none=True)
         if "max_files" in values:
             values["max_files"] = values["max_files"] or None
+        if "gpu_memory_fraction" in values and not 0.05 <= values["gpu_memory_fraction"] <= 0.9:
+            raise HTTPException(400, "gpu_memory_fraction must be between 0.05 and 0.9")
         if {"backend", "laya_model"} & set(values):
             svc.reset_decider()  # reloaded on the next scan
         for k, v in values.items():
@@ -118,6 +124,20 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         guard(svc.set_rules, req.rules)
         save()
         return get_rules()
+
+    # --- example index ------------------------------------------------------------------
+
+    @app.get("/api/index")
+    def index_status():
+        return guard(svc.index_status)
+
+    @app.post("/api/index/build")
+    def index_build():
+        return guard(svc.start_index_build)
+
+    @app.post("/api/index/cancel")
+    def index_cancel():
+        return svc.cancel_index_build()
 
     # --- folder browser -----------------------------------------------------------------
 

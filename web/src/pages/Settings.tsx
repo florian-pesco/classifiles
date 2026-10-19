@@ -3,7 +3,8 @@ import { api, type Settings } from '../api'
 import { PathInput } from '../components/FolderPicker'
 
 const MODELS = [
-  { value: 'laya:convaiinnovations/laya', label: 'Laya English (default)' },
+  { value: 'examples:', label: 'Learn from my folders (recommended; build the index on the Categories page)' },
+  { value: 'laya:convaiinnovations/laya', label: 'Laya English: decides from descriptions' },
   { value: 'laya:ml', label: 'Laya multilingual (better for German; downloads ~650 MB once)' },
   { value: 'keyword:', label: 'Keyword matching (no model; for testing)' },
 ]
@@ -18,7 +19,11 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [threshold, setThreshold] = useState(settings.threshold)
   const [maxFiles, setMaxFiles] = useState(settings.max_files ? String(settings.max_files) : '')
   const [model, setModel] = useState(
-    settings.backend === 'keyword' ? 'keyword:' : `laya:${settings.laya_model === 'multilingual' ? 'ml' : settings.laya_model}`)
+    settings.backend === 'keyword' ? 'keyword:' : settings.backend === 'examples' ? 'examples:'
+      : `laya:${settings.laya_model === 'multilingual' ? 'ml' : settings.laya_model}`)
+  const [perCategory, setPerCategory] = useState(settings.examples_per_category)
+  const [contentPerCategory, setContentPerCategory] = useState(settings.content_per_category)
+  const [gpuShare, setGpuShare] = useState(Math.round(settings.gpu_memory_fraction * 100))
   const [samples, setSamples] = useState(settings.samples_per_folder)
 
   const save = async () => {
@@ -31,6 +36,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         backend,
         ...(laya_model ? { laya_model } : {}),
         samples_per_folder: samples,
+        examples_per_category: perCategory,
+        content_per_category: contentPerCategory,
+        gpu_memory_fraction: gpuShare / 100,
       })
       onSaved(s)
       notify('Settings saved.')
@@ -71,6 +79,28 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="field">
           <span>Sample file names shown to the model for folders without a description</span>
           <input type="number" min={0} max={10} value={samples} onChange={e => setSamples(Number(e.target.value))} />
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Learn from my folders: limits</h3>
+        <p className="muted small">
+          Everything runs on this PC. File contents never leave it. These limits keep the index build gentle:
+          it runs at low priority in small batches and can be cancelled.
+        </p>
+        <label className="field">
+          <span>Example files per category (sampled across subfolders)</span>
+          <input type="number" min={100} max={20000} step={100} value={perCategory}
+                 onChange={e => setPerCategory(Number(e.target.value))} />
+        </label>
+        <label className="field">
+          <span>Documents per category whose text is read (slower on Windows drives)</span>
+          <input type="number" min={0} max={5000} step={50} value={contentPerCategory}
+                 onChange={e => setContentPerCategory(Number(e.target.value))} />
+        </label>
+        <label className="field">
+          <span>Max GPU memory for classifiles: <b>{gpuShare}%</b> (applies after restarting the server)</span>
+          <input type="range" min={10} max={60} step={5} value={gpuShare} onChange={e => setGpuShare(Number(e.target.value))} />
         </label>
       </section>
 

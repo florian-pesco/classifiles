@@ -118,7 +118,51 @@ falls back to its name plus the 3 most recently modified filenames inside it. Th
 a small text budget per folder (see §4), so a short, well-chosen description is the main accuracy
 lever.
 
-## 4. The model: how the decision works
+## 4. The models: how the decision works
+
+There are two real backends (Settings → Model):
+
+- **Learn from my folders** (`examples`, recommended): compares a file with the files you already
+  sorted. It needs no descriptions. See §4a.
+- **Laya**: decides from the category descriptions only. See §4b. It has never seen your files, so
+  it can only match words. In real use it was right about 1 time in 5, and its confidence did not
+  separate right from wrong (0.72 on average for both).
+
+### 4a. Example index (`examples.py`, `embedder.py`, `deciders/examples.py`)
+
+```
+build (background, low priority)                         classify (per inbox file, ~ms)
+────────────────────────────────                         ──────────────────────────────
+for each category folder:                                 query text = file name + type + snippet
+  sample_folder(): ≤ examples_per_category files,         embed (with a retrieval instruction)
+    round-robin over subfolders, skipping .git,           cosine similarity to all examples of the
+    node_modules, build dirs, hidden files                  categories the model may suggest
+  text = "folder: Uni/Vorlesungen/BWL 1                   k = 20 nearest examples
+          file: BWL_Folien.pdf  type: pdf                 weight = exp((sim − best) / 0.05)
+          content: <first 400 chars, docs only>"          P(category) = its share of the weight
+  embed in batches of 32 (+ pause), store float16         reason = the 3 most similar files
+  vectors in SQLite `examples` (incremental by mtime)
++ one "description" example per category
+```
+
+- **Embedding model:** `Qwen/Qwen3-Embedding-0.6B` (multilingual, 1024 dimensions). It runs locally
+  through `sentence-transformers`, in float16 on the GPU, with inputs cut to 256 tokens. The query side
+  uses an instruction prompt ("retrieve files stored in the same folder"); the document side doesn't.
+- **Resource limits:** `torch.cuda.set_per_process_memory_fraction` (default 0.25), 2 CPU threads,
+  `os.nice(10)` for the build thread, a pause between batches, cancellable. Content is read for at
+  most `content_per_category` documents per category (never OCR during indexing).
+- **Offline:** the model loads with `local_files_only=True` and is downloaded only if missing. Then
+  `HF_HUB_OFFLINE=1`; telemetry is off. `tests/test_examples.py` blocks sockets during
+  classification to prove no network use.
+- **Learning:** after Apply, each moved, copied or trashed file is embedded as an `applied` example of
+  its category, in a background thread. Undo removes it again.
+- **Search** is a plain numpy matrix product over all vectors (≈20k × 1024 in float32 ≈ 80 MB of RAM,
+  a few ms per query). No vector database is needed at this size.
+- **Evaluation** (`evaluate.py`, `classifiles eval`): holds out indexed files, classifies them like
+  inbox files (name + content, no folder), and reports accuracy, top-3, per-category recall, the most
+  common confusions, calibration buckets, and accuracy at each threshold.
+
+### 4b. Laya
 
 **Laya** is an open "System One" decision model (Apache-2.0). It is an open alternative to TypeSafe's Jev.
 It does **not** generate text. It reads the state and the options in one forward pass of a
@@ -199,13 +243,14 @@ Each category has an **action**:
 
 ## 7. Database (`store.py`)
 
-One SQLite file, three tables:
+One SQLite file, four tables:
 
 | Table | One row per | Key columns |
 |---|---|---|
 | `scans` | scan run | inbox, target_root (the roots at scan time), backend, threshold, max_files, only_new, status (running/done/failed), processed/total, inbox_total |
 | `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target |
 | `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), moved_at, undone_at, purged_at (trash emptied) |
+| `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16) |
 
 You can inspect it directly:
 
@@ -234,6 +279,9 @@ src/classifiles/
   classifier.py        rules → decider → Classification(target, confidence, alternatives)
   store.py             SQLite schema + tiny helpers
   mover.py             plan_move / execute / revert / purge: move, copy, trash (safety checks)
+  embedder.py          local embedding model with resource caps (lazy, offline after download)
+  examples.py          example index: sample folders, build/update, kNN query, learn/forget
+  evaluate.py          hold-out evaluation (`classifiles eval`)
 src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
 src/classifiles_cli/main.py  `classifiles` command (typer)
 web/src/api.ts               typed fetch wrappers for every endpoint
@@ -275,6 +323,8 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | POST | `/proposals/{id}/open?reveal=` | open in Windows / show in Explorer |
 | GET | `/batches` | applied batches, for History |
 | GET / POST | `/trash`, `/trash/empty` | trash contents / delete permanently |
+| GET | `/index` | example index: build status, example counts per category |
+| POST | `/index/build`, `/index/cancel` | start (background) / cancel an index build |
 | POST | `/scans` `{inbox?, max_files?, only_new?}` | start a scan in a background thread; returns the scan row. `max_files`: omitted/null = settings default, 0 = all |
 | GET | `/scans`, `/scans/{id}` | list scans / progress of one |
 | GET | `/proposals?scan_id=&status=` | proposals (default: latest scan) |

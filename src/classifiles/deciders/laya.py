@@ -17,6 +17,7 @@ class LayaDecider:
 
     def __init__(self, model: str = "convaiinnovations/laya", device: str | None = None):
         os.environ.setdefault("USE_TF", "0")
+        os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
         import laya
 
         self._laya = laya

@@ -32,15 +32,19 @@ Then open **http://127.0.0.1:8765** in your Windows browser. (WSL forwards local
    picker). Windows drives are under `/mnt/c`, `/mnt/d`, …
 2. **Categories → + Add root:** pick the folder that holds your category folders. Each of its
    subfolders becomes a category. Press **Save categories** to load them.
-3. **Write a short description for each category** (about 10 words: what belongs there, in the
-   words that appear in your files, German and English mixed is fine). This is the biggest accuracy
-   lever. Without one, the model only sees the folder name.
-4. Untick categories that should never be offered (e.g. a `Backups` folder).
-5. Optional: **+ Add folder** under *Manual categories* for any folder outside your roots (another
+3. Untick categories that should never be offered (e.g. a `Backups` folder).
+4. **Settings → Model → "Learn from my folders"**, then **Save settings**.
+5. **Categories → Example index → Build index.** Classifiles samples files you have already sorted
+   (spread over all subfolders) and learns what each category contains. The first build takes a
+   few minutes; it runs at low priority, you can keep working, and **Cancel** stops it. Later runs
+   (**Update index**) only process new or changed files. The first build downloads the embedding
+   model once (~1.2 GB); after that everything runs offline.
+6. Optional: **+ Add folder** under *Manual categories* for any folder outside your roots (another
    drive, OneDrive, …). Give it a name, and choose **copy** if the original should stay in the inbox.
-6. Optional: **Rules** for obvious cases (see §4).
-7. If most of your files are German: **Settings → Model → Laya multilingual**. It was clearly better on
-   German documents in testing. The first scan with it downloads ~650 MB once.
+7. Optional: **Rules** for obvious cases (see §4), e.g. *installer → Delete*.
+
+Descriptions are **optional** with "Learn from my folders". They add a little help for categories
+with few files. Every file you apply is learned automatically, so proposals get better as you use it.
 
 An inbox folder is never offered as a category, even if it sits inside a root.
 
@@ -114,7 +118,8 @@ never scanned.
 | Inbox folders | Folders to clean up; the first is pre-filled on Review. |
 | Confidence threshold | At or above → *Suggested*; below → *Needs review*. Applies to the next scan. |
 | Default max files | Pre-fills the number field on Review. |
-| Model | Laya English (default), Laya multilingual (German), or keyword matching (no model, testing only). |
+| Model | **Learn from my folders** (recommended: compares with your already-sorted files), Laya English or multilingual (decide from the descriptions only), or keyword matching (testing only). |
+| Learn from my folders: limits | Example files per category (default 3000), documents whose text is read (default 300), max GPU memory share (default 25%). Lower values make the index faster and lighter. |
 | Sample file names | For categories **without** a description, this many file names from the folder are shown to the model instead. |
 
 Category, rule and setting changes all apply to the **next scan**. Existing proposals keep their
@@ -174,6 +179,8 @@ The same actions also work in the terminal. The CLI and the UI share one databas
 ```bash
 uv run classifiles init --root /mnt/d/Archive --inbox /mnt/d/Archive/Inbox
 uv run classifiles folders                      # categories and what the model sees
+uv run classifiles index                        # build/update the example index (Ctrl+C cancels)
+uv run classifiles eval -b examples -b laya     # measure accuracy on already-sorted files (read-only)
 uv run classifiles scan --limit 100 --only-new
 uv run classifiles list --status needs_review
 uv run classifiles accept --suggested
@@ -222,7 +229,8 @@ svc.undo()
 |---|---|
 | Banner "No categories yet" | Add a root or a manual category on the Categories page. |
 | A category shows "folder missing" | Its folder was moved, renamed, or its drive isn't mounted. |
-| Everything lands in one category with low confidence | Descriptions are missing. Fill them in on Categories. |
+| "The example index is empty" | Build it: Categories → Example index → Build index. |
+| Proposals are poor for one category | It has few or untypical example files. Check its count on the Categories page, sort a few files by hand (they are learned on Apply), or add a description. |
 | `Config file not found` | The file given with `-c` doesn't exist. Create it with `classifiles init -c …`. |
 | "Only new" finds nothing | Every inbox file already has a proposal in some scan. Untick it to re-classify. |
 | External/USB drive not visible | `sudo mkdir -p /mnt/e && sudo mount -t drvfs E: /mnt/e` |

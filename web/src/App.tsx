@@ -75,7 +75,8 @@ export default function App() {
             <ReviewPage settings={settings} categories={cats.categories} scanId={scanId} setScanId={setScanId}
                         notify={notify} fail={fail} />
           )}
-          {page === 'categories' && <CategoriesPage data={cats} onSaved={setCats} notify={notify} fail={fail} />}
+          {page === 'categories' && <CategoriesPage data={cats} examplesActive={settings.backend === 'examples'} onSaved={setCats}
+                                                    notify={notify} fail={fail} />}
           {page === 'rules' && <RulesPage categories={cats.categories} notify={notify} fail={fail} />}
           {page === 'history' && (
             <HistoryPage openScan={id => { setScanId(id); setPage('review') }} notify={notify} fail={fail} />

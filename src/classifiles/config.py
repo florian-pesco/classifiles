@@ -58,10 +58,17 @@ class Settings:
     threshold: float = 0.7
     # Default cap on files per scan (newest first); None = all files in the inbox.
     max_files: int | None = None
-    # Decision backend: "laya" (local model) or "keyword" (no model, for testing).
+    # Decision backend: "examples" (learns from already-sorted files), "laya" (decides from
+    # descriptions) or "keyword" (no model, for testing).
     backend: str = "laya"
     # "convaiinnovations/laya" (English) or "ml" (multilingual, better for German).
     laya_model: str = "convaiinnovations/laya"
+    # Example index (backend "examples"); all local, bounded resource use.
+    embedding_model: str = "Qwen/Qwen3-Embedding-0.6B"
+    examples_per_category: int = 3000   # files sampled per category, spread over subfolders
+    content_per_category: int = 300     # documents per category whose text is read (slow on /mnt/...)
+    gpu_memory_fraction: float = 0.25   # cap on this process's share of GPU memory
+    cpu_threads: int = 2
     # Sample filenames shown to the model for folders WITHOUT a description.
     samples_per_folder: int = 3
     max_text_chars: int = 1500

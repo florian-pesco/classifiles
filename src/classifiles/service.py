@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 import uuid
 from pathlib import Path
 from typing import Callable
@@ -10,6 +11,9 @@ from typing import Callable
 from .classifier import Classifier
 from .config import ACTIONS, Settings
 from .deciders import Decider, make_decider
+from .deciders.examples import ExampleDecider
+from .embedder import Embedder
+from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
 from .rules import load_rules
@@ -37,6 +41,7 @@ class ClassifilesService:
         self.settings = settings or Settings.load()
         self._decider = decider
         self._categories: list[Category] | None = None
+        self._index: ExampleIndex | None = None
         self.store = store or Store(self.settings.db_path)
 
     # --- categories, rules & model -----------------------------------------------------------
@@ -89,11 +94,64 @@ class ClassifilesService:
 
     def decider(self) -> Decider:
         if self._decider is None:
-            self._decider = make_decider(self.settings.backend, laya_model=self.settings.laya_model)
+            if self.settings.backend == "examples":
+                self._decider = ExampleDecider(self.example_index())
+            else:
+                self._decider = make_decider(self.settings.backend, laya_model=self.settings.laya_model)
         return self._decider
 
     def reset_decider(self) -> None:
         self._decider = None
+
+    # --- example index ------------------------------------------------------------------
+
+    def example_index(self) -> ExampleIndex:
+        """The example index (created lazily; the embedding model loads only when first used)."""
+        s = self.settings
+        if self._index is None or self._index.embedder.model_name != s.embedding_model:
+            if self._index is not None and self._index.building:
+                raise ValueError("Wait for the running index build to finish (or cancel it)")
+            embedder = Embedder(s.embedding_model, s.gpu_memory_fraction, s.cpu_threads)
+            self._index = ExampleIndex(self.store, embedder, s.examples_per_category, s.content_per_category)
+        self._index.per_category = s.examples_per_category
+        self._index.content_per_category = s.content_per_category
+        return self._index
+
+    def start_index_build(self) -> dict:
+        """Build/update the example index in the background (low priority, cancellable)."""
+        cats = self.categories(refresh=True)
+        index = self.example_index()
+        index.start_build(cats)
+        return self.index_status()
+
+    def cancel_index_build(self) -> dict:
+        if self._index:
+            self._index.cancel()
+        return self.index_status()
+
+    def index_status(self) -> dict:
+        """Build progress and example counts per category name."""
+        index = self.example_index()
+        counts = index.counts()
+        per_category = []
+        for c in self.categories():
+            n = counts.get(category_key(c), {})
+            per_category.append({"name": c.name, "usable": c.usable, "examples": n.get("scan", 0),
+                                 "learned": n.get("applied", 0)})
+        return {"status": index.status, "model": index.embedder.model_name,
+                "model_loaded": index.embedder.loaded, "total": sum(sum(v.values()) for v in counts.values()),
+                "categories": per_category}
+
+    def _learn(self, items: list[tuple[str, str, str]]) -> None:
+        """Add applied files to the example index in the background (examples backend only)."""
+        if self.settings.backend != "examples" or not items:
+            return
+        index = self.example_index()
+        threading.Thread(target=lambda: _quietly(index.add, items), daemon=True).start()
+
+    def _forget(self, items: list[tuple[str, str]]) -> None:
+        if self._index is not None and items:
+            self._index.remove(items)
 
     def classifier(self, inbox: str | None = None) -> Classifier:
         cats = self.categories(refresh=True, also_exclude=inbox)
@@ -278,7 +336,7 @@ class ClassifilesService:
     def apply(self, scan_id: int | None = None) -> dict:
         """Apply every accepted proposal. Returns {"batch_id", "moved": [...], "errors": [...]}."""
         batch_id = uuid.uuid4().hex[:12]
-        moved, errors = [], []
+        moved, errors, learned = [], [], []
         for p in self.proposals(scan_id, "accepted"):
             m, err = self._plan(p)
             if m:
@@ -293,6 +351,10 @@ class ClassifilesService:
                                         "dst": str(m.dst), "action": m.action, "moved_at": now()})
             self.store.update("proposals", p["id"], {"status": "moved", "updated_at": now()})
             moved.append({"proposal_id": p["id"], "src": str(m.src), "dst": str(m.dst), "action": m.action})
+            key, rel = _learned_key(str(m.dst), m.action)
+            folder = Path(key).name if key != DELETE_KEY else "Delete"
+            learned.append((key, rel, doc_text(folder, p["name"], p["kind"], p["evidence"].get("text", ""))))
+        self._learn(learned)
         return {"batch_id": batch_id if moved else None, "moved": moved, "errors": errors}
 
     def moves(self, limit: int = 500) -> list[dict]:
@@ -315,7 +377,7 @@ class ClassifilesService:
             if not row:
                 return {"batch_id": None, "restored": [], "errors": []}
             batch_id = row["batch_id"]
-        restored, errors = [], []
+        restored, errors, forget = [], [], []
         rows = self.store.query("SELECT * FROM moves WHERE batch_id = ? AND undone_at IS NULL "
                                 "AND purged_at IS NULL ORDER BY id DESC", (batch_id,))
         for m in rows:
@@ -328,6 +390,8 @@ class ClassifilesService:
             if m["proposal_id"]:
                 self.store.update("proposals", m["proposal_id"], {"status": "accepted", "updated_at": now()})
             restored.append({"move_id": m["id"], "path": m["src"]})
+            forget.append(_learned_key(m["dst"], m["action"]))
+        self._forget(forget)
         return {"batch_id": batch_id, "restored": restored, "errors": errors}
 
     # --- trash --------------------------------------------------------------------------
@@ -353,3 +417,17 @@ class ClassifilesService:
             self.store.update("moves", r["id"], {"purged_at": now()})
             purged += 1
         return {"purged": purged, "errors": errors}
+
+
+def _learned_key(dst: str, action: str) -> tuple[str, str]:
+    """(category_key, relpath) under which an applied file is learned. Files land directly in the
+    category folder, so its parent is the category key; trashed files belong to Delete."""
+    p = Path(dst)
+    return (DELETE_KEY, p.name) if action == "delete" else (str(p.parent), p.name)
+
+
+def _quietly(fn, *args) -> None:
+    try:
+        fn(*args)
+    except Exception:  # noqa: BLE001 - learning is best effort, never breaks apply
+        log.exception("learning from applied files failed")

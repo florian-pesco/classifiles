@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type CategoriesPayload, type CategoryEntry, type DeleteSettings } from '../api'
 import { FolderPicker } from '../components/FolderPicker'
+import { IndexCard } from '../components/IndexCard'
 
 interface Row {
   path: string
@@ -29,8 +30,9 @@ function toRows(p: CategoriesPayload): Row[] {
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length
 
-export function CategoriesPage({ data, onSaved, notify, fail }: {
+export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: {
   data: CategoriesPayload
+  examplesActive: boolean
   onSaved: (p: CategoriesPayload) => void
   notify: (m: string) => void
   fail: (e: unknown) => void
@@ -113,6 +115,8 @@ export function CategoriesPage({ data, onSaved, notify, fail }: {
           <p className="muted small">Save to load the subfolders of new roots.</p>
         )}
       </section>
+
+      <IndexCard active={examplesActive} notify={notify} fail={fail} />
 
       {grouped.map(([group, items]) => (
         <section className="card" key={group}>

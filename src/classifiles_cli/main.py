@@ -175,6 +175,70 @@ def undo(batch_id: Optional[str] = typer.Argument(None, help="Batch id (default:
 
 
 @app.command()
+def index(config: Optional[Path] = ConfigOpt):
+    """Build or update the example index from your already-sorted files (low priority; Ctrl+C cancels)."""
+    import time
+
+    svc = _service(config)
+    svc.start_index_build()
+    idx = svc.example_index()
+    try:
+        with Progress(console=console, transient=True) as progress:
+            task = progress.add_task("starting…", total=None)
+            while idx.building:
+                st = idx.status
+                progress.update(task, description=st.get("message", ""), completed=st.get("done", 0),
+                                total=st.get("total") or None)
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        idx.cancel()
+        console.print("Cancelling…")
+        while idx.building:
+            time.sleep(0.2)
+    st = idx.status
+    console.print(f"Index {st['state']}: {st.get('added', 0)} embedded, {st.get('reused', 0)} unchanged, "
+                  f"{st.get('removed', 0)} removed." + (f" Error: {st['error']}" if st.get("error") else ""))
+    t = Table("category", "examples", "learned")
+    for c in svc.index_status()["categories"]:
+        t.add_row(c["name"], str(c["examples"]), str(c["learned"]))
+    console.print(t)
+
+
+@app.command("eval")
+def eval_(
+    backend: list[str] = typer.Option(["examples"], "--backend", "-b", help="examples | laya | keyword (repeatable)"),
+    per_category: int = typer.Option(30, "--per-category", "-n", help="Held-out files per category"),
+    seed: int = 0,
+    config: Optional[Path] = ConfigOpt,
+):
+    """Measure accuracy on already-sorted files (held out, classified like inbox files). Read-only."""
+    from classifiles.evaluate import evaluate
+
+    svc = _service(config)
+    with Progress(console=console, transient=True) as progress:
+        task = progress.add_task("…", total=None)
+        report = evaluate(svc, backend, per_category, seed,
+                          lambda what, i, n: progress.update(task, description=what, completed=i, total=n))
+    console.print(f"[bold]{report['files']} held-out files[/] ({per_category} per category)\n")
+    for name, r in report["results"].items():
+        console.print(f"[bold]{name}[/]: accuracy [bold]{r['accuracy']:.0%}[/], top-3 {r['top3']:.0%}, "
+                      f"mean confidence right {r['mean_confidence_right']} / wrong {r['mean_confidence_wrong']}")
+        t = Table("category", "files", "recall")
+        for cat, v in r["per_category"].items():
+            t.add_row(cat, str(v["files"]), f"{v['recall']:.0%}")
+        cal = Table("confidence", "files", "accuracy")
+        for b in r["calibration"]:
+            cal.add_row(b["range"], str(b["files"]), "—" if b["accuracy"] is None else f"{b['accuracy']:.0%}")
+        th = Table("threshold", "suggested", "accuracy of suggested")
+        for x in r["thresholds"]:
+            th.add_row(str(x["threshold"]), f"{x['suggested']:.0%}", "—" if x["accuracy"] is None else f"{x['accuracy']:.0%}")
+        console.print(t, cal, th)
+        if r["confusions"]:
+            console.print("most common mistakes: " + "; ".join(f"{k} ×{n}" for k, n in r["confusions"]))
+        console.print()
+
+
+@app.command()
 def serve(host: str = "127.0.0.1", port: int = 8765, config: Optional[Path] = ConfigOpt):
     """Start the web UI / REST API."""
     import os

@@ -15,10 +15,11 @@ dependencies = [
 
 [project.optional-dependencies]
 laya = ["laya>=0.4.8"]
+examples = ["sentence-transformers>=5.0", "numpy>=2"]
 ocr = ["rapidocr-onnxruntime>=1.4"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
 cli = ["typer>=0.15", "rich>=13"]
-all = ["classifiles[laya,ocr,api,cli]"]
+all = ["classifiles[laya,examples,ocr,api,cli]"]
 
 [project.scripts]
 classifiles = "classifiles_cli.main:main"
