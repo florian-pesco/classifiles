@@ -125,8 +125,21 @@ There are two real backends (Settings → Model):
 - **Learn from my folders** (`examples`, recommended): compares a file with the files you already
   sorted. It needs no descriptions. See §4a.
 - **Laya**: decides from the category descriptions only. See §4b. It has never seen your files, so
-  it can only match words. In real use it was right about 1 time in 5, and its confidence did not
-  separate right from wrong (0.72 on average for both).
+  it can only match words.
+
+Measured with `classifiles eval -b examples -b laya -n 40` on a real archive (5 categories, ~10k
+indexed examples, 200 held-out files):
+
+| | examples | Laya |
+|---|---|---|
+| accuracy | 78% | 22% |
+| right category in top 3 | 100% | 57% |
+| mean confidence when right / wrong | 0.90 / 0.65 | 0.32 / 0.33 |
+| at threshold 0.8: share suggested / accuracy of those | 67% / 91% | 1% / 50% |
+
+The remaining mistakes are mostly between categories whose contents genuinely overlap (e.g. a
+phone backup folder that also holds personal photos). Held-out files have siblings in the index,
+so files from a topic you have never sorted before will score lower. Check the confidence.
 
 ### 4a. Example index (`examples.py`, `embedder.py`, `deciders/examples.py`)
 

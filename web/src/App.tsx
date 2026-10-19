@@ -32,6 +32,13 @@ export default function App() {
   const fail = useCallback((e: unknown) => setError(e instanceof Error ? e.message : String(e)), [])
   const notify = useCallback((m: string) => { setError(null); setNotice(m) }, [])
 
+  // Follow the address bar (browser back/forward, links to #page).
+  useEffect(() => {
+    const onHash = () => setPageState(initialPage())
+    window.addEventListener('hashchange', onHash)
+    return () => window.removeEventListener('hashchange', onHash)
+  }, [])
+
   useEffect(() => {
     if (!notice) return
     const t = setTimeout(() => setNotice(null), 5000)

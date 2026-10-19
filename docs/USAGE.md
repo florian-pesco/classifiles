@@ -43,6 +43,10 @@ Then open **http://127.0.0.1:8765** in your Windows browser. (WSL forwards local
    drive, OneDrive, …). Give it a name, and choose **copy** if the original should stay in the inbox.
 7. Optional: **Rules** for obvious cases (see §4), e.g. *installer → Delete*.
 
+**Threshold:** with "Learn from my folders", 0.8 is a good start. In testing, two thirds of the
+files were suggested at that level and 91% of those were right. Use 0.9 if you prefer fewer but
+safer suggestions (≈96% right).
+
 Descriptions are **optional** with "Learn from my folders". They add a little help for categories
 with few files. Every file you apply is learned automatically, so proposals get better as you use it.
 

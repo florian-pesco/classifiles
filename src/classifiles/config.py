@@ -60,7 +60,7 @@ class Settings:
     max_files: int | None = None
     # Decision backend: "examples" (learns from already-sorted files), "laya" (decides from
     # descriptions) or "keyword" (no model, for testing).
-    backend: str = "laya"
+    backend: str = "examples"
     # "convaiinnovations/laya" (English) or "ml" (multilingual, better for German).
     laya_model: str = "convaiinnovations/laya"
     # Example index (backend "examples"); all local, bounded resource use.

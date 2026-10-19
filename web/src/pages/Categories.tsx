@@ -88,10 +88,11 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
         <h2>Categories</h2>
         <p>
           Categories are the places files can go. Every subfolder of a <b>root</b> becomes a category
-          automatically. You can also add any other folder as a <b>manual</b> category. For each one,
-          set a short <b>description</b> (what belongs there, about {WORD_LIMIT} words; the model reads
-          little more), switch it <b>off</b> to never offer it, and choose <b>move</b> or <b>copy</b>{' '}
-          (copy keeps the original in the inbox).
+          automatically. You can also add any other folder as a <b>manual</b> category. For each one you
+          can switch it <b>off</b> (never offered), choose <b>move</b> or <b>copy</b> (copy keeps the
+          original in the inbox), and add a short <b>description</b>. Descriptions are optional with
+          "Learn from my folders"; with Laya they are essential (about {WORD_LIMIT} words, Laya reads
+          little more).
         </p>
       </section>
 
