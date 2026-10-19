@@ -1,0 +1,199 @@
+"""Command-line interface for classifiles."""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Optional
+
+import typer
+from rich.console import Console
+from rich.progress import Progress
+from rich.table import Table
+
+from classifiles import ClassifilesService, Settings
+from classifiles.config import DEFAULT_CONFIG_PATH
+
+app = typer.Typer(help="Classify inbox files into your folder taxonomy.", no_args_is_help=True)
+console = Console()
+
+ConfigOpt = typer.Option(None, "--config", "-c", help=f"Config file (default {DEFAULT_CONFIG_PATH})")
+
+
+def _service(config: Optional[Path], **overrides) -> ClassifilesService:
+    settings = Settings.load(config)
+    for k, v in overrides.items():
+        if v is not None:
+            setattr(settings, k, v)
+    return ClassifilesService(settings)
+
+
+def _status_style(status: str) -> str:
+    return {"suggested": "green", "needs_review": "yellow", "accepted": "cyan",
+            "rejected": "dim", "moved": "blue"}.get(status, "")
+
+
+def _proposal_table(rows: list[dict], threshold: float) -> Table:
+    t = Table(show_lines=False)
+    for col in ("id", "file", "→ folder", "conf", "source", "status", "alternatives"):
+        t.add_column(col, overflow="fold")
+    for p in rows:
+        conf_style = "green" if p["confidence"] >= threshold else "yellow"
+        alts = ", ".join(f"{a['folder']} {a['probability']:.2f}" for a in p["alternatives"][1:3])
+        t.add_row(str(p["id"]), p["name"], p["final_target"] or "—", f"[{conf_style}]{p['confidence']:.2f}[/]",
+                  p["source"], f"[{_status_style(p['status'])}]{p['status']}[/]", alts)
+    return t
+
+
+@app.command()
+def init(
+    root: list[Path] = typer.Option(..., "--root", "--target-root",
+                                    help="Folder whose subfolders become categories (repeatable)"),
+    inbox: list[Path] = typer.Option([Path.home() / "Downloads"], help="Inbox folder(s) to sort"),
+    threshold: float = 0.7,
+    config: Optional[Path] = ConfigOpt,
+):
+    """Write a starter config file. Fine-tune categories and rules in the web UI afterwards."""
+    s = Settings(roots=[{"path": str(r.expanduser().resolve())} for r in root],
+                 inboxes=[str(p.expanduser().resolve()) for p in inbox], threshold=threshold)
+    path = s.save(config)
+    console.print(f"Wrote [bold]{path}[/]. Run `classifiles serve` and open Categories to add descriptions.")
+
+
+@app.command()
+def folders(config: Optional[Path] = ConfigOpt):
+    """Show the category folders and how they are described to the model."""
+    svc = _service(config)
+    t = Table("category", "action", "source", "status", "description given to the model")
+    for c in svc.categories():
+        status = "ok" if c.usable else ("missing" if not c.exists else "disabled")
+        if c.usable and not c.suggest:
+            status = "rules/manual only"
+        t.add_row(c.name, c.action, c.source, status, c.option_text())
+    console.print(t)
+
+
+@app.command()
+def scan(
+    inbox: Optional[Path] = typer.Argument(None, help="Inbox folder (default: first configured inbox)"),
+    backend: Optional[str] = typer.Option(None, help="laya | keyword"),
+    threshold: Optional[float] = None,
+    limit: Optional[int] = typer.Option(None, "--limit", "-n",
+                                        help="Classify at most N files, newest first (0 = all)"),
+    only_new: bool = typer.Option(False, "--only-new", help="Skip files classified in an earlier scan"),
+    config: Optional[Path] = ConfigOpt,
+):
+    """Classify the files in the inbox and store the proposals for review."""
+    svc = _service(config, backend=backend, threshold=threshold)
+    inbox = inbox or Path(svc.settings.inboxes[0])
+    scan_id = svc.start_scan(inbox, limit, only_new)
+    scan = svc.get_scan(scan_id)
+    total = scan["total"]
+    if total < scan["inbox_total"]:
+        console.print(f"Classifying {total} of {scan['inbox_total']} files in the inbox.")
+    with Progress(console=console, transient=True) as progress:
+        task = progress.add_task("Loading model…" if svc.settings.backend == "laya" else "Classifying…", total=total)
+        def on_progress(i, n, p):
+            progress.update(task, completed=i, description=f"Classifying {p['name'][:40]}")
+        rows = svc.run_scan(scan_id, on_progress)
+    console.print(_proposal_table(rows, svc.settings.threshold))
+    n_ok = sum(p["status"] == "suggested" for p in rows)
+    console.print(f"Scan [bold]{scan_id}[/]: {n_ok} suggested, {len(rows) - n_ok} need review "
+                  f"(threshold {svc.settings.threshold}).")
+
+
+@app.command("list")
+def list_(
+    scan_id: Optional[int] = typer.Option(None, "--scan"),
+    status: Optional[str] = typer.Option(None, help="suggested|needs_review|accepted|rejected|moved"),
+    config: Optional[Path] = ConfigOpt,
+):
+    """List proposals of a scan (default: latest)."""
+    svc = _service(config)
+    console.print(_proposal_table(svc.proposals(scan_id, status), svc.settings.threshold))
+
+
+@app.command()
+def accept(
+    ids: list[int] = typer.Argument(None, help="Proposal ids; omit with --suggested"),
+    folder: Optional[str] = typer.Option(None, "--to", help="Override the target folder"),
+    suggested: bool = typer.Option(False, "--suggested", help="Accept all proposals above threshold"),
+    scan_id: Optional[int] = typer.Option(None, "--scan"),
+    config: Optional[Path] = ConfigOpt,
+):
+    """Accept proposals (optionally into a different folder)."""
+    svc = _service(config)
+    if suggested:
+        console.print(f"Accepted {svc.accept_suggested(scan_id)} suggested proposals.")
+    for i in ids or []:
+        p = svc.review(i, "accept", folder)
+        console.print(f"{p['name']} → [cyan]{p['final_target']}[/]")
+
+
+@app.command()
+def reject(ids: list[int], config: Optional[Path] = ConfigOpt):
+    """Reject proposals (files stay where they are)."""
+    svc = _service(config)
+    for i in ids:
+        svc.review(i, "reject")
+    console.print(f"Rejected {len(ids)}.")
+
+
+@app.command()
+def apply(
+    scan_id: Optional[int] = typer.Option(None, "--scan"),
+    dry_run: bool = typer.Option(False, "--dry-run", "-n"),
+    yes: bool = typer.Option(False, "--yes", "-y"),
+    config: Optional[Path] = ConfigOpt,
+):
+    """Move all accepted files into their folders."""
+    svc = _service(config)
+    plan = svc.plan_apply(scan_id)
+    if not plan:
+        console.print("Nothing accepted to move. Use `classifiles accept`.")
+        raise typer.Exit()
+    for m in plan:
+        console.print(f"[red]✗ {m['src']}: {m['error']}[/]" if m["error"] else f"{m['src']}\n  → {m['dst']}")
+    if dry_run or not (yes or typer.confirm(f"Move {sum(not m['error'] for m in plan)} files?")):
+        raise typer.Exit()
+    res = svc.apply(scan_id)
+    console.print(f"Moved {len(res['moved'])} files (batch [bold]{res['batch_id']}[/]); {len(res['errors'])} errors.")
+    for e in res["errors"]:
+        console.print(f"[red]✗ {e['src']}: {e['error']}[/]")
+
+
+@app.command()
+def undo(batch_id: Optional[str] = typer.Argument(None, help="Batch id (default: last)"),
+         config: Optional[Path] = ConfigOpt):
+    """Move the files of a batch back to where they came from."""
+    res = _service(config).undo(batch_id)
+    if not res["batch_id"]:
+        console.print("Nothing to undo.")
+        return
+    console.print(f"Restored {len(res['restored'])} files from batch {res['batch_id']}; {len(res['errors'])} errors.")
+    for e in res["errors"]:
+        console.print(f"[red]✗ move {e['move_id']}: {e['error']}[/]")
+
+
+@app.command()
+def serve(host: str = "127.0.0.1", port: int = 8765, config: Optional[Path] = ConfigOpt):
+    """Start the web UI / REST API."""
+    import os
+
+    import uvicorn
+
+    if config:
+        os.environ["CLASSIFILES_CONFIG"] = str(config)
+    console.print(f"Classifiles UI on http://{host}:{port}")
+    uvicorn.run("classifiles_api.app:create_app", factory=True, host=host, port=port)
+
+
+def main() -> None:
+    try:
+        app()
+    except (KeyError, ValueError, FileNotFoundError) as e:
+        console.print(f"[red]Error:[/] {e.args[0] if e.args else e}")
+        raise SystemExit(1)
+
+
+if __name__ == "__main__":
+    main()

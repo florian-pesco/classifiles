@@ -1,0 +1,120 @@
+"""SQLite persistence: scans, proposals (one per file) and the move journal."""
+
+from __future__ import annotations
+
+import json
+import sqlite3
+import threading
+from datetime import datetime
+from pathlib import Path
+
+SCHEMA = """
+CREATE TABLE IF NOT EXISTS scans (
+    id INTEGER PRIMARY KEY,
+    inbox TEXT NOT NULL,
+    target_root TEXT NOT NULL,
+    backend TEXT NOT NULL,
+    threshold REAL NOT NULL,
+    status TEXT NOT NULL DEFAULT 'running',   -- running | done | failed
+    max_files INTEGER,                        -- NULL = no limit
+    only_new INTEGER NOT NULL DEFAULT 0,      -- 1 = skip files classified in earlier scans
+    inbox_total INTEGER NOT NULL DEFAULT 0,   -- files in the inbox when the scan started
+    total INTEGER NOT NULL DEFAULT 0,         -- files selected for this scan
+    processed INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS proposals (
+    id INTEGER PRIMARY KEY,
+    scan_id INTEGER NOT NULL REFERENCES scans(id),
+    path TEXT NOT NULL,
+    name TEXT NOT NULL,
+    kind TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    evidence TEXT NOT NULL,             -- JSON
+    target TEXT,                        -- model/rule proposal
+    confidence REAL NOT NULL,
+    source TEXT NOT NULL,
+    alternatives TEXT NOT NULL,         -- JSON
+    reason TEXT NOT NULL DEFAULT '',
+    -- suggested (>= threshold) | needs_review | accepted | rejected | moved (= applied: moved, copied or trashed; see moves.action)
+    status TEXT NOT NULL,
+    final_target TEXT,                  -- what the user accepted (defaults to target)
+    updated_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
+CREATE TABLE IF NOT EXISTS moves (
+    id INTEGER PRIMARY KEY,
+    batch_id TEXT NOT NULL,
+    proposal_id INTEGER REFERENCES proposals(id),
+    src TEXT NOT NULL,
+    dst TEXT NOT NULL,
+    action TEXT NOT NULL DEFAULT 'move',  -- move | copy | delete
+    moved_at TEXT NOT NULL,
+    undone_at TEXT,
+    purged_at TEXT                        -- delete only: trash emptied, no longer undoable
+);
+"""
+
+# Columns added after the first release: (table, column, definition). Applied to older databases.
+MIGRATIONS = [
+    ("scans", "max_files", "INTEGER"),
+    ("scans", "only_new", "INTEGER NOT NULL DEFAULT 0"),
+    ("scans", "inbox_total", "INTEGER NOT NULL DEFAULT 0"),
+    ("moves", "action", "TEXT NOT NULL DEFAULT 'move'"),
+    ("moves", "purged_at", "TEXT"),
+]
+
+JSON_FIELDS = ("evidence", "alternatives")
+
+
+def now() -> str:
+    return datetime.now().isoformat(timespec="seconds")
+
+
+class Store:
+    def __init__(self, path: str | Path):
+        if str(path) != ":memory:":
+            Path(path).parent.mkdir(parents=True, exist_ok=True)
+        self._db = sqlite3.connect(str(path), check_same_thread=False)
+        self._db.row_factory = sqlite3.Row
+        self._lock = threading.RLock()
+        with self._lock:
+            self._db.executescript(SCHEMA)
+            for table, column, definition in MIGRATIONS:
+                existing = {r[1] for r in self._db.execute(f"PRAGMA table_info({table})")}
+                if column not in existing:
+                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            self._db.commit()
+
+    def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
+        with self._lock:
+            cur = self._db.execute(sql, params)
+            self._db.commit()
+            return cur
+
+    def query(self, sql: str, params: tuple | dict = ()) -> list[dict]:
+        with self._lock:
+            return [_row(r) for r in self._db.execute(sql, params).fetchall()]
+
+    def one(self, sql: str, params: tuple | dict = ()) -> dict | None:
+        rows = self.query(sql, params)
+        return rows[0] if rows else None
+
+    def insert(self, table: str, values: dict) -> int:
+        values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS else v for k, v in values.items()}
+        cols = ", ".join(values)
+        marks = ", ".join(f":{k}" for k in values)
+        return self.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", values).lastrowid
+
+    def update(self, table: str, id: int, values: dict) -> None:
+        sets = ", ".join(f"{k} = :{k}" for k in values)
+        self.execute(f"UPDATE {table} SET {sets} WHERE id = :id", {**values, "id": id})
+
+
+def _row(r: sqlite3.Row) -> dict:
+    d = dict(r)
+    for k in JSON_FIELDS:
+        if k in d and isinstance(d[k], str):
+            d[k] = json.loads(d[k])
+    return d
