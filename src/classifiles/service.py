@@ -57,6 +57,20 @@ class ClassifilesService:
             self._categories = build_categories(s.roots, s.categories, s.samples_per_folder, excluded, s.delete)
         return self._categories
 
+    def unreachable_roots(self) -> list[str]:
+        """Configured roots that cannot be read right now (e.g. an unplugged or unmounted drive)."""
+        return [r["path"] for r in self.settings.roots if not Path(r["path"]).expanduser().is_dir()]
+
+    def check_ready(self) -> None:
+        """Refuse to scan or index when category folders are missing: otherwise every file would be
+        proposed for whatever is left (e.g. Delete) with high confidence."""
+        missing = self.unreachable_roots()
+        if missing:
+            raise ValueError(f"Category root not reachable: {', '.join(missing)}. "
+                             "Is the drive connected and mounted in WSL?")
+        if not any(c.usable and c.path for c in self.categories(refresh=True)):
+            raise ValueError("No category folders available. Add a root or a manual category first.")
+
     def category(self, name: str) -> Category:
         """A usable category by name (raises ValueError otherwise)."""
         for c in self.categories():
@@ -119,6 +133,7 @@ class ClassifilesService:
 
     def start_index_build(self) -> dict:
         """Build/update the example index in the background (low priority, cancellable)."""
+        self.check_ready()
         cats = self.categories(refresh=True)
         index = self.example_index()
         index.start_build(cats)
@@ -190,6 +205,7 @@ class ClassifilesService:
 
         max_files defaults to settings.max_files; pass 0 to scan all files regardless."""
         inbox = str(Path(inbox).expanduser().resolve())
+        self.check_ready()
         if max_files is None:
             max_files = self.settings.max_files
         max_files = max_files or None
@@ -298,12 +314,13 @@ class ClassifilesService:
             if not target:
                 raise ValueError("Choose a category first")
             self.category(target)  # validates
-            values = {"status": "accepted", "final_target": target}
+            values = {"status": "accepted", "final_target": target,
+                      "decided_via": "confirm" if target == p["target"] else "override"}
         elif action == "reject":
-            values = {"status": "rejected"}
+            values = {"status": "rejected", "decided_via": "reject"}
         else:
             values = {"status": "suggested" if p["target"] and p["confidence"] >= self.settings.threshold
-                      else "needs_review", "final_target": p["target"]}
+                      else "needs_review", "final_target": p["target"], "decided_via": None}
         self.store.update("proposals", proposal_id, {**values, "updated_at": now()})
         return self.get_proposal(proposal_id)
 
@@ -311,7 +328,8 @@ class ClassifilesService:
         """Accept every proposal at or above the threshold. Returns how many were accepted."""
         scan_id = scan_id or self.latest_scan_id()
         cur = self.store.execute(
-            "UPDATE proposals SET status = 'accepted', updated_at = ? WHERE scan_id = ? AND status = 'suggested'",
+            "UPDATE proposals SET status = 'accepted', decided_via = 'bulk', updated_at = ? "
+            "WHERE scan_id = ? AND status = 'suggested'",
             (now(), scan_id),
         )
         return cur.rowcount

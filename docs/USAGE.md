@@ -184,7 +184,8 @@ The same actions also work in the terminal. The CLI and the UI share one databas
 uv run classifiles init --root /mnt/d/Archive --inbox /mnt/d/Archive/Inbox
 uv run classifiles folders                      # categories and what the model sees
 uv run classifiles index                        # build/update the example index (Ctrl+C cancels)
-uv run classifiles eval -b examples -b laya     # measure accuracy on already-sorted files (read-only)
+uv run classifiles eval -b examples -b laya     # accuracy on held-out sorted files (file + folder split)
+uv run classifiles eval --decisions             # accuracy against your real Review decisions
 uv run classifiles scan --limit 100 --only-new
 uv run classifiles list --status needs_review
 uv run classifiles accept --suggested
@@ -233,6 +234,7 @@ svc.undo()
 |---|---|
 | Banner "No categories yet" | Add a root or a manual category on the Categories page. |
 | A category shows "folder missing" | Its folder was moved, renamed, or its drive isn't mounted. |
+| Red banner "Category folder not reachable" | The drive with your categories isn't mounted (unplugged, or WSL started without it). Scans and index updates pause until it is back; connect it and press "Check again". If WSL doesn't mount it by itself: `sudo mount -t drvfs D: /mnt/d`. |
 | "The example index is empty" | Build it: Categories → Example index → Build index. |
 | Proposals are poor for one category | It has few or untypical example files. Check its count on the Categories page, sort a few files by hand (they are learned on Apply), or add a description. |
 | `Config file not found` | The file given with `-c` doesn't exist. Create it with `classifiles init -c …`. |

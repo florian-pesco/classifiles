@@ -60,6 +60,22 @@ export interface CategoriesPayload {
   roots: { path: string }[]
   delete: DeleteSettings
   categories: Category[]
+  unreachable_roots: string[]
+}
+
+export interface QualitySummary {
+  files: number
+  accuracy?: number
+  top3?: number
+  by_decided_via?: Record<string, { files: number; accuracy: number }>
+  calibration?: { range: string; files: number; accuracy: number | null }[]
+}
+
+export interface Quality {
+  decisions: number
+  decided_via: Record<string, number>
+  recorded: Record<string, QualitySummary>
+  current?: QualitySummary
 }
 
 /** One category's stored settings, as sent back to the server. */
@@ -193,6 +209,7 @@ export const api = {
   planApply: (scanId: number) => call<PlannedMove[]>('POST', '/api/apply/plan', { scan_id: scanId }),
   apply: (scanId: number) => call<ApplyResult>('POST', '/api/apply', { scan_id: scanId }),
   batches: () => call<Batch[]>('GET', '/api/batches'),
+  quality: (rerun = false) => call<Quality>('GET', `/api/quality?${q({ rerun })}`),
   undo: (batchId?: string) =>
     call<{ batch_id: string | null; restored: unknown[]; errors: { error: string }[] }>(
       'POST', `/api/undo?${q({ batch_id: batchId })}`),

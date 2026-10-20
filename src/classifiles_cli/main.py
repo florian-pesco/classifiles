@@ -208,34 +208,55 @@ def index(config: Optional[Path] = ConfigOpt):
 def eval_(
     backend: list[str] = typer.Option(["examples"], "--backend", "-b", help="examples | laya | keyword (repeatable)"),
     per_category: int = typer.Option(30, "--per-category", "-n", help="Held-out files per category"),
+    split: list[str] = typer.Option(["file", "folder"], "--split",
+                                    help="file: hide single files; folder: hide whole folders (new topics)"),
+    decisions: bool = typer.Option(False, "--decisions", help="Measure against your real Review decisions instead"),
     seed: int = 0,
     config: Optional[Path] = ConfigOpt,
 ):
-    """Measure accuracy on already-sorted files (held out, classified like inbox files). Read-only."""
-    from classifiles.evaluate import evaluate
+    """Measure accuracy (read-only; prints aggregates only, never file names)."""
+    from classifiles.evaluate import evaluate, evaluate_decisions
 
     svc = _service(config)
+    if decisions:
+        report = evaluate_decisions(svc)
+        console.print(f"[bold]{report['decisions']} decided files[/] (how: {report['decided_via']})\n")
+        for name, r in report["recorded"].items():
+            _print_summary(f"recorded at scan time: {name}", r)
+        if "current" in report:
+            _print_summary("current model (examples), re-run on the same files", report["current"])
+        return
     with Progress(console=console, transient=True) as progress:
         task = progress.add_task("…", total=None)
-        report = evaluate(svc, backend, per_category, seed,
+        report = evaluate(svc, backend, per_category, seed, tuple(split),
                           lambda what, i, n: progress.update(task, description=what, completed=i, total=n))
     console.print(f"[bold]{report['files']} held-out files[/] ({per_category} per category)\n")
     for name, r in report["results"].items():
-        console.print(f"[bold]{name}[/]: accuracy [bold]{r['accuracy']:.0%}[/], top-3 {r['top3']:.0%}, "
-                      f"mean confidence right {r['mean_confidence_right']} / wrong {r['mean_confidence_wrong']}")
-        t = Table("category", "files", "recall")
-        for cat, v in r["per_category"].items():
-            t.add_row(cat, str(v["files"]), f"{v['recall']:.0%}")
-        cal = Table("confidence", "files", "accuracy")
-        for b in r["calibration"]:
-            cal.add_row(b["range"], str(b["files"]), "—" if b["accuracy"] is None else f"{b['accuracy']:.0%}")
-        th = Table("threshold", "suggested", "accuracy of suggested")
-        for x in r["thresholds"]:
-            th.add_row(str(x["threshold"]), f"{x['suggested']:.0%}", "—" if x["accuracy"] is None else f"{x['accuracy']:.0%}")
-        console.print(t, cal, th)
-        if r["confusions"]:
-            console.print("most common mistakes: " + "; ".join(f"{k} ×{n}" for k, n in r["confusions"]))
-        console.print()
+        _print_summary(name, r)
+
+
+def _print_summary(name: str, r: dict) -> None:
+    if not r.get("files"):
+        console.print(f"[bold]{name}[/]: no files\n")
+        return
+    console.print(f"[bold]{name}[/] ({r['files']} files): accuracy [bold]{r['accuracy']:.0%}[/], top-3 {r['top3']:.0%}, "
+                  f"mean confidence right {r['mean_confidence_right']} / wrong {r['mean_confidence_wrong']}")
+    t = Table("category", "files", "recall")
+    for cat, v in r["per_category"].items():
+        t.add_row(cat, str(v["files"]), f"{v['recall']:.0%}")
+    cal = Table("confidence", "files", "accuracy")
+    for b in r["calibration"]:
+        cal.add_row(b["range"], str(b["files"]), "—" if b["accuracy"] is None else f"{b['accuracy']:.0%}")
+    th = Table("threshold", "suggested", "accuracy of suggested")
+    for x in r["thresholds"]:
+        th.add_row(str(x["threshold"]), f"{x['suggested']:.0%}", "—" if x["accuracy"] is None else f"{x['accuracy']:.0%}")
+    console.print(t, cal, th)
+    if r.get("by_decided_via"):
+        console.print("by how you decided: " + "; ".join(f"{k}: {v['accuracy']:.0%} of {v['files']}"
+                                                         for k, v in r["by_decided_via"].items()))
+    if r["confusions"]:
+        console.print("most common mistakes (true → proposed): " + "; ".join(f"{k} ×{n}" for k, n in r["confusions"]))
+    console.print()
 
 
 @app.command()
