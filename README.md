@@ -1,15 +1,26 @@
 # classifiles
 
-Sort overflowing inbox folders (e.g. `~/Downloads`) into your existing folder structure with a local
-decision model. Every file gets a proposed folder plus a calibrated confidence. Anything below the
-threshold waits for your review. Nothing moves until you accept it, and every move can be undone.
+Sort overflowing inbox folders (e.g. `~/Downloads`) into your existing folder structure. Classifiles
+learns from the files you have **already sorted**: a new file is proposed for the category whose
+existing files are most similar to it. Anything below the confidence threshold waits for your review.
+Nothing changes on disk until you apply it, and everything can be undone.
 
 ```
 inbox file ─► extract (name, type, metadata, text/OCR snippet)
            ─► rules (exact matches, confidence 1.0)
-           ─► decision model picks one of the category folders (probability per folder)
-           ─► suggested (≥ threshold) | needs_review  ─► you accept/override/reject ─► move (journaled, undoable)
+           ─► nearest already-sorted files (local embedding model) → probability per category
+           ─► suggested (≥ threshold) | needs_review  ─► you accept/override/reject ─► move/copy/trash (journaled, undoable)
 ```
+
+## Privacy and resource use
+
+- **Everything runs on your PC.** File names, paths and contents are never sent anywhere. The
+  models (an embedding model for "learn from my folders", optionally Laya) are downloaded once from
+  Hugging Face. That download sends no data, and afterwards the models load offline (`HF_HUB_OFFLINE`,
+  telemetry disabled). A test checks that classification opens no network connections.
+- **Gentle on the hardware.** GPU memory is capped (default 25%). Indexing runs in a background thread
+  at low CPU priority, in small batches with pauses, is cancellable and incremental, and is bounded by
+  per-category caps. Classifying a file takes milliseconds.
 
 Categories are the subfolders of one or more **roots**, plus any **manual** folders, plus a built-in **Delete** (to an undoable trash). All of it is configured in the web UI.
 

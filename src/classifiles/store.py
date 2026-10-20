@@ -54,6 +54,18 @@ CREATE TABLE IF NOT EXISTS moves (
     undone_at TEXT,
     purged_at TEXT                        -- delete only: trash emptied, no longer undoable
 );
+-- Already-sorted files used as examples by the example-based classifier (see examples.py).
+CREATE TABLE IF NOT EXISTS examples (
+    id INTEGER PRIMARY KEY,
+    category_key TEXT NOT NULL,           -- category folder path, or '__delete__'
+    relpath TEXT NOT NULL,                -- path inside the category folder
+    mtime REAL NOT NULL DEFAULT 0,
+    origin TEXT NOT NULL DEFAULT 'scan',  -- scan (indexed from disk) | applied (learned from you) | description
+    has_content INTEGER NOT NULL DEFAULT 0,
+    model TEXT NOT NULL,
+    vector BLOB NOT NULL,                 -- float16, L2-normalised
+    UNIQUE (category_key, relpath, origin)
+);
 """
 
 # Columns added after the first release: (table, column, definition). Applied to older databases.
@@ -92,6 +104,11 @@ class Store:
             cur = self._db.execute(sql, params)
             self._db.commit()
             return cur
+
+    def executemany(self, sql: str, rows: list[tuple] | list[dict]) -> None:
+        with self._lock:
+            self._db.executemany(sql, rows)
+            self._db.commit()
 
     def query(self, sql: str, params: tuple | dict = ()) -> list[dict]:
         with self._lock:

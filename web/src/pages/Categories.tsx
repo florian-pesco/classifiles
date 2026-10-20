@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { api, type CategoriesPayload, type CategoryEntry, type DeleteSettings } from '../api'
 import { FolderPicker } from '../components/FolderPicker'
+import { IndexCard } from '../components/IndexCard'
 
 interface Row {
   path: string
@@ -29,8 +30,9 @@ function toRows(p: CategoriesPayload): Row[] {
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length
 
-export function CategoriesPage({ data, onSaved, notify, fail }: {
+export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: {
   data: CategoriesPayload
+  examplesActive: boolean
   onSaved: (p: CategoriesPayload) => void
   notify: (m: string) => void
   fail: (e: unknown) => void
@@ -86,10 +88,11 @@ export function CategoriesPage({ data, onSaved, notify, fail }: {
         <h2>Categories</h2>
         <p>
           Categories are the places files can go. Every subfolder of a <b>root</b> becomes a category
-          automatically. You can also add any other folder as a <b>manual</b> category. For each one,
-          set a short <b>description</b> (what belongs there, about {WORD_LIMIT} words; the model reads
-          little more), switch it <b>off</b> to never offer it, and choose <b>move</b> or <b>copy</b>{' '}
-          (copy keeps the original in the inbox).
+          automatically. You can also add any other folder as a <b>manual</b> category. For each one you
+          can switch it <b>off</b> (never offered), choose <b>move</b> or <b>copy</b> (copy keeps the
+          original in the inbox), and add a short <b>description</b>. Descriptions are optional with
+          "Learn from my folders"; with Laya they are essential (about {WORD_LIMIT} words, Laya reads
+          little more).
         </p>
       </section>
 
@@ -113,6 +116,8 @@ export function CategoriesPage({ data, onSaved, notify, fail }: {
           <p className="muted small">Save to load the subfolders of new roots.</p>
         )}
       </section>
+
+      <IndexCard active={examplesActive} notify={notify} fail={fail} />
 
       {grouped.map(([group, items]) => (
         <section className="card" key={group}>
