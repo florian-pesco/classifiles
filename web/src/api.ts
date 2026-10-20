@@ -86,6 +86,30 @@ export interface Settings {
   backend: string
   laya_model: string
   samples_per_folder: number
+  embedding_model: string
+  examples_per_category: number
+  content_per_category: number
+  gpu_memory_fraction: number
+  cpu_threads: number
+}
+
+export interface IndexStatus {
+  status: {
+    state: 'idle' | 'running' | 'done' | 'failed' | 'cancelled'
+    message?: string
+    category?: string | null
+    done?: number
+    total?: number
+    added?: number
+    reused?: number
+    removed?: number
+    error?: string | null
+    finished_at?: string
+  }
+  model: string
+  model_loaded: boolean
+  total: number
+  categories: { name: string; usable: boolean; examples: number; learned: number }[]
 }
 
 export interface PlannedMove {
@@ -146,6 +170,10 @@ export const api = {
     call<CategoriesPayload>('PUT', '/api/categories', { roots, categories, delete: del }),
   rules: () => call<{ rules: Rule[]; kinds: string[] }>('GET', '/api/rules'),
   saveRules: (rules: Rule[]) => call<{ rules: Rule[]; kinds: string[] }>('PUT', '/api/rules', { rules }),
+
+  index: () => call<IndexStatus>('GET', '/api/index'),
+  buildIndex: () => call<IndexStatus>('POST', '/api/index/build'),
+  cancelIndex: () => call<IndexStatus>('POST', '/api/index/cancel'),
 
   browse: (path?: string) => call<FsListing>('GET', `/api/fs?${q({ path })}`),
 

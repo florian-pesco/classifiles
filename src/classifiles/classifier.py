@@ -41,6 +41,7 @@ class Classifier:
             else:
                 log.warning("Skipping rule %s: category %r is unknown or disabled", r.describe(), r.folder)
         self._options = {c.name: c.option_text() for c in self.categories}
+        self.decider_kwargs: dict = {}  # extra arguments for classify_evidence (evaluation uses exclude_ids)
 
     def classify(self, ev: Evidence) -> Classification:
         rule = first_match(self.rules, ev)
@@ -50,8 +51,12 @@ class Classifier:
             return Classification(None, 0.0, "none", reason="no categories configured")
         if self.decider is None:
             return Classification(None, 0.0, "none", reason="no rule matched and no model configured")
-        probs = self.decider.choose(ev.to_state(), QUESTION, self._options)
+        reason = ""
+        if hasattr(self.decider, "classify_evidence"):  # example-based: needs the evidence, not a prompt
+            probs, reason = self.decider.classify_evidence(ev, self.categories, **self.decider_kwargs)
+        else:
+            probs = self.decider.choose(ev.to_state(), QUESTION, self._options)
         ranked = sorted(probs.items(), key=lambda kv: kv[1], reverse=True)
         best, p = ranked[0]
         alts = [{"folder": f, "probability": round(q, 4)} for f, q in ranked[:4]]
-        return Classification(best, round(p, 4), self.decider.name, alts)
+        return Classification(best, round(p, 4), self.decider.name, alts, reason)
