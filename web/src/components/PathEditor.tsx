@@ -56,7 +56,7 @@ export function PathEditor({ category, subpath, suggested, newFolder, disabled, 
         </button>
       )}
       {editing && (
-        <PathDialog category={category} start={subpath || (newFolder ?? '')}
+        <PathDialog category={category} start={subpath ? `${subpath}/` : ''}
                     onCancel={() => setEditing(false)}
                     onSave={v => { setEditing(false); onChange(v) }} />
       )}
@@ -86,6 +86,9 @@ function PathDialog({ category, start, onCancel, onSave }: {
 
   const matches = dirs.filter(d => d.toLowerCase().startsWith(lastPart.toLowerCase()))
   const willCreate = !exists || (lastPart !== '' && !dirs.includes(lastPart))
+  const location = parent ? `${category}/${parent}` : category
+  const goTo = (path: string) => setValue(path ? `${path}/` : '')
+  const up = parent.includes('/') ? parent.slice(0, parent.lastIndexOf('/')) : ''
 
   return (
     <div className="path-dialog" onKeyDown={e => { if (e.key === 'Escape') onCancel() }}>
@@ -97,13 +100,15 @@ function PathDialog({ category, start, onCancel, onSave }: {
         <button className="primary" onClick={() => onSave(value.trim())}>Use</button>
       </div>
       {willCreate && value.trim() && <p className="small warn-text">Folders that don't exist yet will be created when you apply.</p>}
-      {matches.length > 0 && (
-        <div className="shortcuts">
-          {matches.slice(0, 30).map(d => (
-            <button key={d} className="chip" onClick={() => setValue((parent ? `${parent}/` : '') + d + '/')}>📁 {d}</button>
-          ))}
-        </div>
-      )}
+      <div className="shortcuts">
+        <span className="small muted">{exists ? `In ${location}:` : `${location} doesn't exist yet`}</span>
+        {parent !== '' && <button className="chip" onClick={() => goTo(up)} title="One level up">⬑ up</button>}
+        {matches.slice(0, 40).map(d => (
+          <button key={d} className="chip" onClick={() => goTo((parent ? `${parent}/` : '') + d)}>📁 {d}</button>
+        ))}
+        {exists && dirs.length === 0 && <span className="small muted">no subfolders</span>}
+        {exists && dirs.length > 0 && matches.length === 0 && <span className="small muted">no folder starts with “{lastPart}”</span>}
+      </div>
     </div>
   )
 }
