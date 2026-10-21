@@ -28,6 +28,15 @@ export function IndexCard({ active, notify, fail }: {
 
   const build = async () => { try { setSt(await api.buildIndex()) } catch (e) { fail(e) } }
   const cancel = async () => { try { setSt(await api.cancelIndex()) } catch (e) { fail(e) } }
+  const [learning, setLearning] = useState(false)
+  const learnPast = async () => {
+    setLearning(true)
+    try {
+      const r = await api.learnPast()
+      notify(`Learned ${r.learned} past decisions${r.by_action.delete ? ` (${r.by_action.delete} deletions)` : ''}.`)
+      await load()
+    } catch (e) { fail(e) } finally { setLearning(false) }
+  }
 
   if (!st) return null
   const s = st.status
@@ -52,6 +61,14 @@ export function IndexCard({ active, notify, fail }: {
         </div>
       )}
       {s.state === 'failed' && <div className="banner error">Index build failed: {s.error}</div>}
+      {st.unlearned > 0 && !running && (
+        <div className="banner info">
+          {st.unlearned} files you applied earlier are not learned yet (e.g. applied while another model was selected).
+          {' '}<button className="linkish" onClick={learnPast} disabled={learning}>
+            {learning ? 'Learning…' : 'Learn them now'}
+          </button>
+        </div>
+      )}
       {!running && s.state !== 'idle' && s.state !== 'failed' && (
         <p className="small muted">
           Last run {s.state}{s.finished_at ? ` at ${shortDate(s.finished_at)}` : ''}: {s.added ?? 0} new,{' '}

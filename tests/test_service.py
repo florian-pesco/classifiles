@@ -140,3 +140,22 @@ def test_old_database_is_migrated(tmp_path):
     con.close()
     row = Store(db).one("SELECT * FROM scans")
     assert row["inbox_total"] == 0 and row["only_new"] == 0 and row["max_files"] is None
+
+
+def test_scan_refuses_when_root_unreachable(service, tree, tmp_path):
+    service.settings.roots = [{"path": str(tmp_path / "unplugged")}]
+    service.invalidate()
+    with pytest.raises(ValueError, match="not reachable"):
+        service.scan(tree["inbox"])
+    with pytest.raises(ValueError, match="not reachable"):
+        service.start_index_build()
+
+
+def test_scan_refuses_without_folder_categories(service, tree, tmp_path):
+    empty = tmp_path / "emptyroot"
+    empty.mkdir()
+    service.settings.roots = [{"path": str(empty)}]
+    service.settings.categories = []
+    service.invalidate()
+    with pytest.raises(ValueError, match="No category folders"):
+        service.scan(tree["inbox"])

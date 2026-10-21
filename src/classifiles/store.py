@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS proposals (
     -- suggested (>= threshold) | needs_review | accepted | rejected | moved (= applied: moved, copied or trashed; see moves.action)
     status TEXT NOT NULL,
     final_target TEXT,                  -- what the user accepted (defaults to target)
+    decided_via TEXT,                   -- confirm | override | bulk | reject (NULL: undecided or before tracking)
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
@@ -75,6 +76,7 @@ MIGRATIONS = [
     ("scans", "inbox_total", "INTEGER NOT NULL DEFAULT 0"),
     ("moves", "action", "TEXT NOT NULL DEFAULT 'move'"),
     ("moves", "purged_at", "TEXT"),
+    ("proposals", "decided_via", "TEXT"),
 ]
 
 JSON_FIELDS = ("evidence", "alternatives")

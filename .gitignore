@@ -5,3 +5,6 @@ __pycache__/
 web/node_modules/
 web/dist/
 *.db
+
+# Local notes, not part of the repo
+docs/FUTURE_WORK.md
