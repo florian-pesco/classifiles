@@ -136,6 +136,10 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     def index_build():
         return guard(svc.start_index_build)
 
+    @app.post("/api/index/learn-past")
+    def index_learn_past():
+        return guard(svc.learn_past_decisions)
+
     @app.post("/api/index/cancel")
     def index_cancel():
         return svc.cancel_index_build()

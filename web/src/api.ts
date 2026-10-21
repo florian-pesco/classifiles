@@ -126,6 +126,7 @@ export interface IndexStatus {
   model_loaded: boolean
   total: number
   categories: { name: string; usable: boolean; examples: number; learned: number }[]
+  unlearned: number
 }
 
 export interface PlannedMove {
@@ -190,6 +191,7 @@ export const api = {
   index: () => call<IndexStatus>('GET', '/api/index'),
   buildIndex: () => call<IndexStatus>('POST', '/api/index/build'),
   cancelIndex: () => call<IndexStatus>('POST', '/api/index/cancel'),
+  learnPast: () => call<{ learned: number; by_action: Record<string, number> }>('POST', '/api/index/learn-past'),
 
   browse: (path?: string) => call<FsListing>('GET', `/api/fs?${q({ path })}`),
 

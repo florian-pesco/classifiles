@@ -49,6 +49,9 @@ safer suggestions (≈96% right).
 
 Descriptions are **optional** with "Learn from my folders". They add a little help for categories
 with few files. Every file you apply is learned automatically, so proposals get better as you use it.
+This includes files you send to **Delete**: that's how the model learns what you consider junk.
+If the index card says that earlier applied files are not learned yet (e.g. from before the index
+existed), press **Learn them now**.
 
 An inbox folder is never offered as a category, even if it sits inside a root.
 
@@ -184,6 +187,7 @@ The same actions also work in the terminal. The CLI and the UI share one databas
 uv run classifiles init --root /mnt/d/Archive --inbox /mnt/d/Archive/Inbox
 uv run classifiles folders                      # categories and what the model sees
 uv run classifiles index                        # build/update the example index (Ctrl+C cancels)
+uv run classifiles index --learn-past           # learn applied files that are not learned yet
 uv run classifiles eval -b examples -b laya     # accuracy on held-out sorted files (file + folder split)
 uv run classifiles eval --decisions             # accuracy against your real Review decisions
 uv run classifiles scan --limit 100 --only-new

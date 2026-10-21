@@ -89,7 +89,8 @@ def evaluate(service, backends: list[str], per_category: int = 30, seed: int = 0
                 if progress:
                     progress(f"classifying ({backend}, {split})", i, len(holdout))
                 if backend == "examples":
-                    clf.decider_kwargs = {"exclude_ids": all_held | siblings.get(h["id"], set())}
+                    hidden = all_held | (siblings.get(h["id"], set()) if split == "folder" else set())
+                    clf.decider_kwargs = {"exclude_ids": hidden}
                 c = clf.classify(ev)
                 rows.append({"true": h["category"], "pred": c.target, "confidence": c.confidence,
                              "top3": [a["folder"] for a in c.alternatives[:3]]})
@@ -102,7 +103,7 @@ def decided_proposals(service) -> list[dict]:
     """Proposals you decided in Review (accepted, overridden or applied), excluding rule hits."""
     return service.store.query("""
         SELECT p.id, p.evidence, p.target, p.final_target, p.confidence, p.alternatives, p.decided_via,
-               s.backend, m.dst
+               s.backend, m.dst, m.action
         FROM proposals p
         JOIN scans s ON s.id = p.scan_id
         LEFT JOIN moves m ON m.proposal_id = p.id
@@ -127,10 +128,24 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
 
     if rerun and rows:
         service.check_ready()
+        # hide each applied file from the index, both as scanned example (by its new path) and as
+        # learned example (by its learned key; trashed files are learned under Delete)
+        from .service import _learned_key
+
+        examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
+                                       (service.settings.embedding_model,))
         by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
-                   for e in service.store.query("SELECT id, category_key, relpath FROM examples WHERE model = ?",
-                                                (service.settings.embedding_model,))}
-        hide = {by_path[os.path.normpath(r["dst"])] for r in rows if r["dst"] and os.path.normpath(r["dst"]) in by_path}
+                   for e in examples if e["origin"] == "scan"}
+        by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
+        hide = set()
+        for r in rows:
+            if not r["dst"]:
+                continue
+            if os.path.normpath(r["dst"]) in by_path:
+                hide.add(by_path[os.path.normpath(r["dst"])])
+            learned = by_learned.get(_learned_key(r["dst"], r["action"]))
+            if learned:
+                hide.add(learned)
         clf = Classifier(service.categories(), ExampleDecider(service.example_index()))
         clf.decider_kwargs = {"exclude_ids": hide}
         fields = Evidence.__dataclass_fields__

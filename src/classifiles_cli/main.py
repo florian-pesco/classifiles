@@ -175,11 +175,19 @@ def undo(batch_id: Optional[str] = typer.Argument(None, help="Batch id (default:
 
 
 @app.command()
-def index(config: Optional[Path] = ConfigOpt):
+def index(
+    learn_past: bool = typer.Option(False, "--learn-past",
+                                    help="Only learn applied files that are not learned yet (no folder scan)"),
+    config: Optional[Path] = ConfigOpt,
+):
     """Build or update the example index from your already-sorted files (low priority; Ctrl+C cancels)."""
     import time
 
     svc = _service(config)
+    if learn_past:
+        r = svc.learn_past_decisions()
+        console.print(f"Learned {r['learned']} past decisions {r['by_action'] or ''}.")
+        return
     svc.start_index_build()
     idx = svc.example_index()
     try:

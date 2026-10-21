@@ -155,18 +155,51 @@ class ClassifilesService:
                                  "learned": n.get("applied", 0)})
         return {"status": index.status, "model": index.embedder.model_name,
                 "model_loaded": index.embedder.loaded, "total": sum(sum(v.values()) for v in counts.values()),
-                "categories": per_category}
+                "categories": per_category, "unlearned": len(self.unlearned_decisions())}
 
     def _learn(self, items: list[tuple[str, str, str]]) -> None:
-        """Add applied files to the example index in the background (examples backend only)."""
-        if self.settings.backend != "examples" or not items:
+        """Add applied files to the example index in the background. Happens with any model as long
+        as an index exists, so no decision is lost when switching models later."""
+        if not items:
             return
         index = self.example_index()
+        if self.settings.backend != "examples" and index.size == 0:
+            return  # no index yet: unlearned decisions can be backfilled later (learn_past_decisions)
         threading.Thread(target=lambda: _quietly(index.add, items), daemon=True).start()
 
     def _forget(self, items: list[tuple[str, str]]) -> None:
-        if self._index is not None and items:
-            self._index.remove(items)
+        if items:
+            self.example_index().remove(items)
+
+    def unlearned_decisions(self) -> list[tuple[str, str, str]]:
+        """Applied files (not undone) that are not in the index as learned examples yet, as
+        (category_key, relpath, text) built from the stored evidence. No file access needed."""
+        rows = self.store.query("""
+            SELECT m.dst, m.action, p.name, p.kind, p.evidence FROM moves m
+            JOIN proposals p ON p.id = m.proposal_id
+            WHERE m.undone_at IS NULL""")
+        learned = {(r["category_key"], r["relpath"]) for r in self.store.query(
+            "SELECT category_key, relpath FROM examples WHERE origin = 'applied' AND model = ?",
+            (self.settings.embedding_model,))}
+        out = []
+        for r in rows:
+            key, rel = _learned_key(r["dst"], r["action"])
+            if (key, rel) in learned:
+                continue
+            folder = Path(key).name if key != DELETE_KEY else "Delete"
+            out.append((key, rel, doc_text(folder, r["name"], r["kind"], r["evidence"].get("text", ""))))
+        return out
+
+    def learn_past_decisions(self) -> dict:
+        """Backfill: learn every applied file that was applied without learning (e.g. while another
+        model was selected). Uses the stored evidence only; runs in seconds."""
+        items = self.unlearned_decisions()
+        self.example_index().add(items)
+        by = {}
+        for key, _, _ in items:
+            kind = "delete" if key == DELETE_KEY else "move/copy"
+            by[kind] = by.get(kind, 0) + 1
+        return {"learned": len(items), "by_action": by}
 
     def classifier(self, inbox: str | None = None) -> Classifier:
         cats = self.categories(refresh=True, also_exclude=inbox)

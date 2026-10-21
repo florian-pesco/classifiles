@@ -168,7 +168,10 @@ for each category folder:                                 query text = file name
   `HF_HUB_OFFLINE=1`; telemetry is off. `tests/test_examples.py` blocks sockets during
   classification to prove no network use.
 - **Learning:** after Apply, each moved, copied or trashed file is embedded as an `applied` example of
-  its category, in a background thread. Undo removes it again.
+  its category, in a background thread. This happens with any selected model once an index exists.
+  Undo removes the example again. Files applied without learning (e.g. before an index existed) are
+  backfilled from their stored evidence by `learn_past_decisions()` (UI: "Learn them now" on the
+  index card; CLI: `classifiles index --learn-past`). No file access is needed.
 - **Search** is a plain numpy matrix product over all vectors (≈20k × 1024 in float32 ≈ 80 MB of RAM,
   a few ms per query). No vector database is needed at this size.
 - **Evaluation** (`evaluate.py`, `classifiles eval`). Output is aggregates only, never file names.
