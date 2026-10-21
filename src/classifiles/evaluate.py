@@ -103,7 +103,7 @@ def decided_proposals(service) -> list[dict]:
     """Proposals you decided in Review (accepted, overridden or applied), excluding rule hits."""
     return service.store.query("""
         SELECT p.id, p.evidence, p.target, p.final_target, p.confidence, p.alternatives, p.decided_via,
-               s.backend, m.dst, m.action
+               s.backend, m.dst, m.action, m.category_key
         FROM proposals p
         JOIN scans s ON s.id = p.scan_id
         LEFT JOIN moves m ON m.proposal_id = p.id
@@ -143,7 +143,7 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
                 continue
             if os.path.normpath(r["dst"]) in by_path:
                 hide.add(by_path[os.path.normpath(r["dst"])])
-            learned = by_learned.get(_learned_key(r["dst"], r["action"]))
+            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
             if learned:
                 hide.add(learned)
         clf = Classifier(service.categories(), ExampleDecider(service.example_index()))

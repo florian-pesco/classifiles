@@ -187,6 +187,27 @@ for each category folder:                                 query text = file name
   (e.g. an unmounted drive). Otherwise every file would go to whatever category is left, such as
   Delete, with high confidence.
 
+### 4c. Folder inside the category (`paths.py`)
+
+- **Suggestion:** the k nearest examples of the chosen category vote with their folders, and every
+  prefix of a folder gets the neighbour's weight. The deepest prefix with ≥60% of the category's
+  weight is `suggested_subpath` (`''` = category folder). Stored neighbours (`proposals.neighbours`)
+  let a category change recompute it without re-embedding.
+- **New folders:**
+  1. *Numbered sibling:* the suggested folder ends in a number (`Econ 1`, `2025`, `Order35`) and the
+     file name has the same word with another number. If that sibling exists, it becomes the
+     suggestion. Otherwise it is offered as `new_folder`, and the default falls back to the shared
+     parent.
+  2. *Container:* similar files are spread over several subfolders with no favourite. Similar inbox
+     files of the same scan (cosine ≥ 0.8) are grouped, and one name is made from their shared
+     file-name words.
+- **Safety:** `normalize_subpath` rejects `..`, Windows-invalid characters and trailing dots/spaces.
+  `plan_move` checks the target stays inside the category, and folders are only created by
+  `execute()` on Apply. The journal stores `created_dir`, and `revert()` removes created folders
+  again if they're empty.
+- **Learning:** applied files are learned with their path inside the category
+  (`moves.category_key` + relative path), so later suggestions include folders created on Apply.
+
 ### 4b. Laya
 
 **Laya** is an open "System One" decision model (Apache-2.0). It is an open alternative to TypeSafe's Jev.
@@ -273,8 +294,8 @@ One SQLite file, four tables:
 | Table | One row per | Key columns |
 |---|---|---|
 | `scans` | scan run | inbox, target_root (the roots at scan time), backend, threshold, max_files, only_new, status (running/done/failed), processed/total, inbox_total |
-| `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target |
-| `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), moved_at, undone_at, purged_at (trash emptied) |
+| `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder |
+| `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), category_key, created_dir, moved_at, undone_at, purged_at (trash emptied) |
 | `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16) |
 
 You can inspect it directly:

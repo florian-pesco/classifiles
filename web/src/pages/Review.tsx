@@ -4,6 +4,7 @@ import {
   type Category, type PlannedMove, type Proposal, type Scan, type Settings, type Status,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { PathEditor } from '../components/PathEditor'
 import { PathInput } from '../components/FolderPicker'
 import { Modal } from '../components/Modal'
 import { Preview } from '../components/Preview'
@@ -124,16 +125,17 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   }
 
   // Optimistic review: update the row immediately, roll back if the server refuses.
-  const review = async (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string) => {
+  const review = async (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) => {
     const optimistic: Proposal = {
       ...p,
       status: action === 'accept' ? 'accepted' : action === 'reject' ? 'rejected'
         : (p.target && p.confidence >= (scan?.threshold ?? settings.threshold) ? 'suggested' : 'needs_review'),
       final_target: action === 'accept' ? (folder ?? p.final_target) : action === 'reset' ? p.target : p.final_target,
+      subpath: subpath !== undefined ? subpath : action === 'reset' ? p.suggested_subpath : p.subpath,
     }
     setProposals(ps => ps.map(x => (x.id === p.id ? optimistic : x)))
     try {
-      const saved = await api.review(p.id, action, folder)
+      const saved = await api.review(p.id, action, folder, subpath)
       setProposals(ps => ps.map(x => (x.id === p.id ? saved : x)))
     } catch (e) {
       setProposals(ps => ps.map(x => (x.id === p.id ? p : x)))
@@ -141,12 +143,12 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     }
   }
 
-  const acceptSuggested = async () => {
+  const acceptSuggested = async (topLevel = false) => {
     if (!scan) return
     try {
-      const { accepted } = await api.acceptSuggested(scan.id)
+      const { accepted } = await api.acceptSuggested(scan.id, topLevel)
       setProposals(await api.proposals(scan.id))
-      notify(`Accepted ${accepted} suggested files.`)
+      notify(`Accepted ${accepted} suggested files${topLevel ? ' (category folders only, no subfolders)' : ''}.`)
     } catch (e) { fail(e) }
   }
 
@@ -250,8 +252,12 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       </ul>
 
       <footer className="actions">
-        <button onClick={acceptSuggested} disabled={!counts.suggested}>
+        <button onClick={() => acceptSuggested()} disabled={!counts.suggested}>
           Accept all suggested ({counts.suggested ?? 0})
+        </button>
+        <button onClick={() => acceptSuggested(true)} disabled={!counts.suggested}
+                title="Accept the suggested categories, but put the files directly into the category folders">
+          … category only
         </button>
         <button className="primary" onClick={openPlan} disabled={!counts.accepted}>
           Apply accepted ({counts.accepted ?? 0})
@@ -274,6 +280,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
                   <span className="mono">{m.src.split('/').pop()}</span>
                 </span>
                 <span className="muted mono small">{m.error ?? `→ ${m.dst}`}</span>
+                {m.creates && <span className="small warn-text">creates new folder <span className="mono">{m.creates}</span></span>}
               </li>
             ))}
           </ul>
@@ -293,9 +300,10 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
   p: Proposal
   categories: Category[]
   threshold: number
-  onReview: (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string) => void
+  onReview: (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) => void
   onPreview: () => void
 }) {
+  const cat = categories.find(c => c.name === p.final_target)
   const [open, setOpen] = useState(false)
   const done = p.status === 'moved'
   const confClass = p.confidence >= threshold ? 'high' : p.confidence >= threshold / 2 ? 'mid' : 'low'
@@ -333,6 +341,12 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
                       onChange={name => name && onReview(p, 'accept', name)} label={`Category for ${p.name}`} />
 
       <span className={`badge ${p.status}`}>{statusLabel}</span>
+
+      {cat && cat.source !== 'delete' && (
+        <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
+                    newFolder={p.new_folder} disabled={done}
+                    onChange={sub => onReview(p, 'accept', p.final_target ?? undefined, sub)} />
+      )}
 
       <div className="rowbtns">
         {!done && p.status !== 'accepted' && (

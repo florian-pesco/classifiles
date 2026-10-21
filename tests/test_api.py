@@ -64,3 +64,13 @@ def test_categories_rules_fs_and_file_endpoints(service, tree, tmp_path):
 
     scans = client.get("/api/scans").json()
     assert scans[0]["counts"]
+
+
+def test_ui_page_is_not_cached(service, tmp_path):
+    from classifiles_api.app import WEB_DIST
+
+    if not (WEB_DIST / "index.html").exists():
+        return  # UI not built in this checkout
+    client = TestClient(create_app(service, config_path=str(tmp_path / "cfg.yaml")))
+    r = client.get("/")
+    assert r.status_code == 200 and r.headers["cache-control"] == "no-cache"

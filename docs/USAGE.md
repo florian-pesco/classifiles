@@ -72,10 +72,21 @@ An inbox folder is never offered as a category, even if it sits inside a root.
    - **Category dropdown:** choosing a category accepts the file into it. 🗑 *Delete* is at the bottom.
    - **✓** accept as proposed · **✕** keep in inbox · **↺** reset.
    - **Accept all suggested** accepts everything at or above the threshold.
-3. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
+3. **Folder inside the category** (line under each file, "Learn from my folders" only). Classifiles
+   suggests the subfolder where the most similar files are, e.g. `Studies › Lectures › Econ 1`.
+   - It is **used by default** when you accept (✓ or *Accept all suggested*).
+   - **Click a part** of the path to shorten it to that level; **category only** puts the file
+     directly into the category folder. *… category only* in the footer does that for all suggested files.
+   - **edit…** lets you type or pick any folder inside the category. Folders that don't exist yet
+     are created when you apply.
+   - **+ new folder "…"**: when a file looks like a new course or year (e.g. `Econ2_…` next to a
+     `Econ 1` folder, or `…_2026_…` next to `2025`), a new sibling folder is proposed. Until you
+     click it, the file goes to the existing parent folder. New folders are only ever created on
+     Apply, and Undo removes them again if they're empty.
+4. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
    happens until you confirm.
-4. **Undo last apply** reverses the last batch. Older batches can be undone on the History page.
-5. **Older scans:** pick one from the scan dropdown, or open it from *History & trash*.
+5. **Undo last apply** reverses the last batch. Older batches can be undone on the History page.
+6. **Older scans:** pick one from the scan dropdown, or open it from *History & trash*.
 
 Status names: **Suggested** (confidence ≥ threshold) · **Needs review** (below) · **Accepted** ·
 **Kept in inbox** · **Done** (moved, copied or in trash).
