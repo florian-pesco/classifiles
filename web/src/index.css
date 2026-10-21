@@ -221,3 +221,19 @@ h3 { font-size: 15px; margin: 0; }
   .cat-desc { grid-column: 2 / -1; order: 5; }
   .rule-grid { grid-template-columns: 1fr 1fr; }
 }
+
+/* folder path inside the category (Review rows) */
+.path-editor {
+  grid-column: 1 / -1; order: 10; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 6px;
+  border-top: 1px dashed var(--border); padding-top: 8px; margin-top: -2px;
+}
+.crumb-wrap { display: inline-flex; align-items: center; gap: 6px; }
+.crumb { padding: 2px 8px; border-radius: 6px; font-size: 13px; }
+.crumb.root { color: var(--muted); }
+.crumb.last:disabled, .crumb:disabled { opacity: 1; cursor: default; }
+.crumb.last { font-weight: 600; }
+.sep { color: var(--muted); }
+.badge.new { background: var(--warn-bg); color: var(--warn); }
+.chip.suggest-new { border-style: dashed; color: var(--accent); }
+.path-dialog { flex-basis: 100%; display: flex; flex-direction: column; gap: 6px; margin-top: 4px; }
+.path-dialog .row-form { margin: 0; align-items: center; }

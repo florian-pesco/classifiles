@@ -14,6 +14,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from .paths import normalize_subpath, split_existing
 from .taxonomy import Category
 
 TRASH_DIR = ".classifiles-trash"
@@ -28,9 +29,12 @@ class PlannedMove:
     src: Path
     dst: Path
     action: str  # move | copy | delete
+    created_dir: Path | None = None  # topmost folder that apply will create (None: all exist)
 
 
-def plan_move(src: str | Path, category: Category) -> PlannedMove:
+def plan_move(src: str | Path, category: Category, subpath: str = "") -> PlannedMove:
+    """Where `src` goes. `subpath` is a folder inside the category ('' = the category folder);
+    missing folders in it are created by execute() and removed again by revert() if empty."""
     src = Path(src)
     if not category.usable:
         raise MoveError(f"Category {category.name!r} is disabled or its folder is missing")
@@ -38,12 +42,22 @@ def plan_move(src: str | Path, category: Category) -> PlannedMove:
         raise MoveError(f"Source file is missing: {src}")
     if category.action == "delete":
         return PlannedMove(src, free_name(src.parent / TRASH_DIR / src.name), "delete")
-    dest_dir = category.path
-    if dest_dir is None or not dest_dir.is_dir():
-        raise MoveError(f"Target folder does not exist: {dest_dir}")
-    if dest_dir.resolve() == src.parent.resolve():
+    root = category.path
+    if root is None or not root.is_dir():
+        raise MoveError(f"Target folder does not exist: {root}")
+    try:
+        subpath = normalize_subpath(subpath)
+    except ValueError as e:
+        raise MoveError(str(e)) from None
+    dest_dir = root / subpath if subpath else root
+    if root.resolve() not in (dest_dir.resolve(), *dest_dir.resolve().parents):
+        raise MoveError(f"Folder {subpath!r} is outside the category")
+    existing, missing = split_existing(root, subpath)
+    created = (root / existing / missing[0]) if missing else None
+    if not missing and dest_dir.resolve() == src.parent.resolve():
         raise MoveError(f"File is already in {dest_dir}")
-    return PlannedMove(src, free_name(dest_dir / src.name), category.action)
+    dst = dest_dir / src.name if missing else free_name(dest_dir / src.name)
+    return PlannedMove(src, dst, category.action, created)
 
 
 def free_name(path: Path) -> Path:
@@ -60,6 +74,8 @@ def free_name(path: Path) -> Path:
 def execute(m: PlannedMove) -> None:
     if m.dst.exists():
         raise MoveError(f"Destination already exists: {m.dst}")
+    if m.created_dir is not None and m.created_dir.exists() and not m.created_dir.is_dir():
+        raise MoveError(f"A file is in the way of the new folder: {m.created_dir}")
     m.dst.parent.mkdir(parents=True, exist_ok=True)
     if m.action == "copy":
         shutil.copy2(m.src, m.dst)  # keeps the modification time, used by revert()
@@ -67,8 +83,21 @@ def execute(m: PlannedMove) -> None:
         shutil.move(str(m.src), str(m.dst))
 
 
-def revert(src: Path, dst: Path, action: str) -> None:
-    """Undo one journaled operation."""
+def remove_empty_dirs(start: Path, up_to: Path) -> None:
+    """Remove `start` and its parents while they are empty, stopping after `up_to` (inclusive)."""
+    current = start
+    try:
+        while up_to == current or up_to in current.parents:
+            current.rmdir()  # fails (and stops) as soon as a folder is not empty
+            if current == up_to:
+                break
+            current = current.parent
+    except OSError:
+        pass
+
+
+def revert(src: Path, dst: Path, action: str, created_dir: Path | None = None) -> None:
+    """Undo one journaled operation. Folders created for it are removed again if empty."""
     if not dst.exists():
         raise MoveError(f"File is no longer at {dst}")
     if action == "copy":
@@ -80,11 +109,15 @@ def revert(src: Path, dst: Path, action: str) -> None:
         else:
             raise MoveError(f"Original is gone, keeping the copy: {dst}")
         os.remove(dst)
+        if created_dir is not None:
+            remove_empty_dirs(dst.parent, created_dir)
         return
     if src.exists():
         raise MoveError(f"Something new is at the original place, not overwriting: {src}")
     src.parent.mkdir(parents=True, exist_ok=True)
     shutil.move(str(dst), str(src))
+    if created_dir is not None:
+        remove_empty_dirs(dst.parent, created_dir)
     if action == "delete":
         try:
             dst.parent.rmdir()  # remove the trash folder once empty

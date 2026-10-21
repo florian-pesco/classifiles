@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import threading
 import uuid
 from pathlib import Path
@@ -16,6 +17,7 @@ from .embedder import Embedder
 from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
+from .paths import normalize_subpath, numbered_sibling, suggest_folder_name, suggest_subpath
 from .rules import load_rules
 from .store import Store, now
 from .taxonomy import Category, build_categories
@@ -175,7 +177,7 @@ class ClassifilesService:
         """Applied files (not undone) that are not in the index as learned examples yet, as
         (category_key, relpath, text) built from the stored evidence. No file access needed."""
         rows = self.store.query("""
-            SELECT m.dst, m.action, p.name, p.kind, p.evidence FROM moves m
+            SELECT m.dst, m.action, m.category_key, p.name, p.kind, p.evidence FROM moves m
             JOIN proposals p ON p.id = m.proposal_id
             WHERE m.undone_at IS NULL""")
         learned = {(r["category_key"], r["relpath"]) for r in self.store.query(
@@ -183,11 +185,11 @@ class ClassifilesService:
             (self.settings.embedding_model,))}
         out = []
         for r in rows:
-            key, rel = _learned_key(r["dst"], r["action"])
+            key, rel = _learned_key(r["dst"], r["action"], r["category_key"])
             if (key, rel) in learned:
                 continue
-            folder = Path(key).name if key != DELETE_KEY else "Delete"
-            out.append((key, rel, doc_text(folder, r["name"], r["kind"], r["evidence"].get("text", ""))))
+            out.append((key, rel, doc_text(_learned_folder(key, rel), r["name"], r["kind"],
+                                           r["evidence"].get("text", ""))))
         return out
 
     def learn_past_decisions(self) -> dict:
@@ -257,17 +259,22 @@ class ClassifilesService:
             clf = self.classifier(scan["inbox"])
             files = self.select_files(scan["inbox"], scan["max_files"], bool(scan["only_new"]))
             self.store.update("scans", scan_id, {"total": len(files)})
-            out = []
+            out, candidates = [], []
             for i, path in enumerate(files, 1):
                 try:
-                    proposal = self._classify_file(scan_id, clf, path, scan["threshold"])
+                    proposal, candidate = self._classify_file(scan_id, clf, path, scan["threshold"])
                 except FileNotFoundError:  # moved or deleted since the scan started
                     proposal = None
                 else:
                     out.append(proposal)
+                    if candidate:
+                        candidates.append(candidate)
                 self.store.update("scans", scan_id, {"processed": i})
                 if on_progress and proposal:
                     on_progress(i, len(files), proposal)
+            if candidates:
+                self._suggest_new_folders(candidates)
+                out = [self.get_proposal(p["id"]) for p in out]
             self.store.update("scans", scan_id, {"status": "done"})
             return out
         except Exception as e:
@@ -279,17 +286,71 @@ class ClassifilesService:
         scan_id = self.start_scan(inbox, max_files, only_new)
         return scan_id, self.run_scan(scan_id, on_progress)
 
-    def _classify_file(self, scan_id: int, clf: Classifier, path: Path, threshold: float) -> dict:
+    def _classify_file(self, scan_id: int, clf: Classifier, path: Path, threshold: float) -> tuple[dict, dict | None]:
+        """Classify and store one file. Returns the proposal and, if a new subfolder might fit,
+        a candidate for _suggest_new_folders()."""
         ev = extract(path, self.settings.max_text_chars)
         c = clf.classify(ev)
         status = "suggested" if c.target and c.confidence >= threshold else "needs_review"
+        subpath, container = suggest_subpath(c.neighbours, c.target) if c.target else ("", False)
+        new_folder = None
+        sibling = numbered_sibling(subpath, ev.name)
+        if sibling:
+            cat_path = self.category(c.target).path
+            if cat_path is not None and (cat_path / sibling).is_dir():
+                subpath = sibling  # e.g. "BWL 2" exists already: that's the folder
+            elif cat_path is not None:
+                new_folder = sibling  # e.g. "BWL 2" doesn't exist yet: propose it ...
+                subpath = sibling.rpartition("/")[0]  # ... and default to the shared parent folder
+            container = False
         pid = self.store.insert("proposals", {
             "scan_id": scan_id, "path": str(path), "name": ev.name, "kind": ev.kind, "size": ev.size,
             "evidence": ev.to_dict(), "target": c.target, "confidence": c.confidence, "source": c.source,
             "alternatives": c.alternatives, "reason": c.reason, "status": status,
-            "final_target": c.target, "updated_at": now(),
+            "final_target": c.target, "neighbours": c.neighbours, "suggested_subpath": subpath,
+            "subpath": subpath, "new_folder": new_folder, "updated_at": now(),
         })
-        return self.get_proposal(pid)
+        candidate = None
+        if container and c.vector is not None:
+            candidate = {"id": pid, "category": c.target, "parent": subpath, "name": ev.name, "vector": c.vector}
+        return self.get_proposal(pid), candidate
+
+    def _suggest_new_folders(self, candidates: list[dict], min_similarity: float = 0.8) -> None:
+        """Propose a new subfolder for files whose similar files are spread over many subfolders.
+        Similar inbox files of the same scan (same category and parent folder) are grouped and get
+        one shared name from their common words. If that folder already exists, it is suggested
+        as a normal subfolder instead."""
+        import numpy as np
+
+        groups: dict[tuple[str, str], list[dict]] = {}
+        for cand in candidates:
+            groups.setdefault((cand["category"], cand["parent"]), []).append(cand)
+        for (category, parent), members in groups.items():
+            try:
+                cat_path = self.category(category).path
+            except ValueError:
+                continue
+            if cat_path is None:
+                continue
+            clusters: list[list[dict]] = []
+            for m in members:  # greedy: join the first cluster whose seed is similar enough
+                for cl in clusters:
+                    if float(np.dot(cl[0]["vector"], m["vector"])) >= min_similarity:
+                        cl.append(m)
+                        break
+                else:
+                    clusters.append([m])
+            for cl in clusters:
+                name = suggest_folder_name([m["name"] for m in cl])
+                if not name:
+                    continue
+                sub = f"{parent}/{name}" if parent else name
+                if (cat_path / sub).is_dir():  # exists already: just suggest it
+                    for m in cl:
+                        self.store.update("proposals", m["id"], {"suggested_subpath": sub, "subpath": sub})
+                else:
+                    for m in cl:
+                        self.store.update("proposals", m["id"], {"new_folder": sub})
 
     def get_scan(self, scan_id: int) -> dict:
         scan = self.store.one("SELECT * FROM scans WHERE id = ?", (scan_id,))
@@ -335,8 +396,13 @@ class ClassifilesService:
             return Path(p["applied_dst"])
         return Path(p["path"])
 
-    def review(self, proposal_id: int, action: str, folder: str | None = None) -> dict:
-        """accept (optionally choosing the category), reject (leave the file where it is), or reset."""
+    def review(self, proposal_id: int, action: str, folder: str | None = None, subpath: str | None = None) -> dict:
+        """accept (optionally choosing the category and/or the folder inside it), reject (leave the
+        file where it is), or reset.
+
+        subpath: folder inside the category ('' = category top level). Missing folders in it are
+        created on apply, so passing one is the confirmation for a new folder. If the category
+        changes and no subpath is given, the suggestion is recomputed for the new category."""
         if action not in REVIEW_ACTIONS:
             raise ValueError(f"action must be one of {sorted(REVIEW_ACTIONS)}")
         p = self.get_proposal(proposal_id)
@@ -346,22 +412,32 @@ class ClassifilesService:
             target = folder or p["final_target"] or p["target"]
             if not target:
                 raise ValueError("Choose a category first")
-            self.category(target)  # validates
+            cat = self.category(target)  # validates
             values = {"status": "accepted", "final_target": target,
                       "decided_via": "confirm" if target == p["target"] else "override"}
+            if cat.action == "delete":
+                values["subpath"] = ""
+            elif subpath is not None:
+                values["subpath"] = normalize_subpath(subpath)
+            elif target != (p["final_target"] or p["target"]):
+                values["subpath"] = suggest_subpath(p["neighbours"] or [], target)[0]
+                values["new_folder"] = None
         elif action == "reject":
             values = {"status": "rejected", "decided_via": "reject"}
         else:
             values = {"status": "suggested" if p["target"] and p["confidence"] >= self.settings.threshold
-                      else "needs_review", "final_target": p["target"], "decided_via": None}
+                      else "needs_review", "final_target": p["target"], "decided_via": None,
+                      "subpath": p["suggested_subpath"] or ""}
         self.store.update("proposals", proposal_id, {**values, "updated_at": now()})
         return self.get_proposal(proposal_id)
 
-    def accept_suggested(self, scan_id: int | None = None) -> int:
-        """Accept every proposal at or above the threshold. Returns how many were accepted."""
+    def accept_suggested(self, scan_id: int | None = None, top_level: bool = False) -> int:
+        """Accept every proposal at or above the threshold, into its suggested folder (or, with
+        top_level, directly into the category folder). Returns how many were accepted."""
         scan_id = scan_id or self.latest_scan_id()
+        extra = ", subpath = ''" if top_level else ""
         cur = self.store.execute(
-            "UPDATE proposals SET status = 'accepted', decided_via = 'bulk', updated_at = ? "
+            f"UPDATE proposals SET status = 'accepted', decided_via = 'bulk'{extra}, updated_at = ? "
             "WHERE scan_id = ? AND status = 'suggested'",
             (now(), scan_id),
         )
@@ -371,7 +447,7 @@ class ClassifilesService:
 
     def _plan(self, p: dict):
         try:
-            return plan_move(p["path"], self.category(p["final_target"])), None
+            return plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or ""), None
         except (MoveError, ValueError) as e:
             return None, str(e)
 
@@ -381,7 +457,9 @@ class ClassifilesService:
         for p in self.proposals(scan_id, "accepted"):
             m, err = self._plan(p)
             out.append({"proposal_id": p["id"], "src": p["path"], "dst": str(m.dst) if m else None,
-                        "action": m.action if m else None, "category": p["final_target"], "error": err})
+                        "action": m.action if m else None, "category": p["final_target"],
+                        "subpath": p["subpath"] or "",
+                        "creates": str(m.created_dir) if m and m.created_dir else None, "error": err})
         return out
 
     def apply(self, scan_id: int | None = None) -> dict:
@@ -398,13 +476,19 @@ class ClassifilesService:
             if err:
                 errors.append({"proposal_id": p["id"], "src": p["path"], "error": err})
                 continue
+            cat_key = category_key(self.category(p["final_target"]))
             self.store.insert("moves", {"batch_id": batch_id, "proposal_id": p["id"], "src": str(m.src),
-                                        "dst": str(m.dst), "action": m.action, "moved_at": now()})
+                                        "dst": str(m.dst), "action": m.action, "category_key": cat_key,
+                                        "created_dir": str(m.created_dir) if m.created_dir else None,
+                                        "moved_at": now()})
             self.store.update("proposals", p["id"], {"status": "moved", "updated_at": now()})
-            moved.append({"proposal_id": p["id"], "src": str(m.src), "dst": str(m.dst), "action": m.action})
-            key, rel = _learned_key(str(m.dst), m.action)
-            folder = Path(key).name if key != DELETE_KEY else "Delete"
-            learned.append((key, rel, doc_text(folder, p["name"], p["kind"], p["evidence"].get("text", ""))))
+            moved.append({"proposal_id": p["id"], "src": str(m.src), "dst": str(m.dst), "action": m.action,
+                          "created_dir": str(m.created_dir) if m.created_dir else None})
+            key, rel = _learned_key(str(m.dst), m.action, cat_key)
+            learned.append((key, rel, doc_text(_learned_folder(key, rel), p["name"], p["kind"],
+                                               p["evidence"].get("text", ""))))
+            if m.created_dir:
+                self.invalidate()  # a new folder exists now: refresh the cached categories
         self._learn(learned)
         return {"batch_id": batch_id if moved else None, "moved": moved, "errors": errors}
 
@@ -433,7 +517,8 @@ class ClassifilesService:
                                 "AND purged_at IS NULL ORDER BY id DESC", (batch_id,))
         for m in rows:
             try:
-                revert(Path(m["src"]), Path(m["dst"]), m["action"])
+                revert(Path(m["src"]), Path(m["dst"]), m["action"],
+                       Path(m["created_dir"]) if m["created_dir"] else None)
             except (MoveError, OSError) as e:
                 errors.append({"move_id": m["id"], "error": str(e)})
                 continue
@@ -441,7 +526,7 @@ class ClassifilesService:
             if m["proposal_id"]:
                 self.store.update("proposals", m["proposal_id"], {"status": "accepted", "updated_at": now()})
             restored.append({"move_id": m["id"], "path": m["src"]})
-            forget.append(_learned_key(m["dst"], m["action"]))
+            forget.append(_learned_key(m["dst"], m["action"], m["category_key"]))
         self._forget(forget)
         return {"batch_id": batch_id, "restored": restored, "errors": errors}
 
@@ -470,11 +555,27 @@ class ClassifilesService:
         return {"purged": purged, "errors": errors}
 
 
-def _learned_key(dst: str, action: str) -> tuple[str, str]:
-    """(category_key, relpath) under which an applied file is learned. Files land directly in the
-    category folder, so its parent is the category key; trashed files belong to Delete."""
+def _learned_key(dst: str, action: str, cat_key: str | None = None) -> tuple[str, str]:
+    """(category_key, relpath) under which an applied file is learned. Trashed files belong to
+    Delete. Otherwise the relpath is the file's path inside its category folder. Moves recorded
+    before category_key was journaled landed directly in the category folder (its parent)."""
     p = Path(dst)
-    return (DELETE_KEY, p.name) if action == "delete" else (str(p.parent), p.name)
+    if action == "delete":
+        return DELETE_KEY, p.name
+    if cat_key and cat_key != DELETE_KEY:
+        try:
+            return cat_key, p.relative_to(cat_key).as_posix()
+        except ValueError:
+            pass
+    return str(p.parent), p.name
+
+
+def _learned_folder(key: str, relpath: str) -> str:
+    """Folder text for a learned example: category folder name plus the subfolder, if any."""
+    if key == DELETE_KEY:
+        return "Delete"
+    sub = os.path.dirname(relpath)
+    return f"{Path(key).name}/{sub}" if sub else Path(key).name
 
 
 def _quietly(fn, *args) -> None:

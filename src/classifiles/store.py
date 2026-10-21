@@ -41,6 +41,10 @@ CREATE TABLE IF NOT EXISTS proposals (
     status TEXT NOT NULL,
     final_target TEXT,                  -- what the user accepted (defaults to target)
     decided_via TEXT,                   -- confirm | override | bulk | reject (NULL: undecided or before tracking)
+    neighbours TEXT,                    -- JSON: most similar examples [{category, dir, weight}] (example backend)
+    suggested_subpath TEXT,             -- folder inside the category suggested by the model ('' = top level)
+    subpath TEXT,                       -- folder inside the category that apply will use ('' = top level)
+    new_folder TEXT,                    -- suggested NEW subpath (not created unless chosen as subpath)
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
@@ -51,6 +55,8 @@ CREATE TABLE IF NOT EXISTS moves (
     src TEXT NOT NULL,
     dst TEXT NOT NULL,
     action TEXT NOT NULL DEFAULT 'move',  -- move | copy | delete
+    category_key TEXT,                    -- category folder path (or '__delete__')
+    created_dir TEXT,                     -- topmost folder created for this move (removed on undo if empty)
     moved_at TEXT NOT NULL,
     undone_at TEXT,
     purged_at TEXT                        -- delete only: trash emptied, no longer undoable
@@ -77,9 +83,15 @@ MIGRATIONS = [
     ("moves", "action", "TEXT NOT NULL DEFAULT 'move'"),
     ("moves", "purged_at", "TEXT"),
     ("proposals", "decided_via", "TEXT"),
+    ("proposals", "neighbours", "TEXT"),
+    ("proposals", "suggested_subpath", "TEXT"),
+    ("proposals", "subpath", "TEXT"),
+    ("proposals", "new_folder", "TEXT"),
+    ("moves", "category_key", "TEXT"),
+    ("moves", "created_dir", "TEXT"),
 ]
 
-JSON_FIELDS = ("evidence", "alternatives")
+JSON_FIELDS = ("evidence", "alternatives", "neighbours")
 
 
 def now() -> str:
