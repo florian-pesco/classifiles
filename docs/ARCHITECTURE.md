@@ -168,12 +168,24 @@ for each category folder:                                 query text = file name
   `HF_HUB_OFFLINE=1`; telemetry is off. `tests/test_examples.py` blocks sockets during
   classification to prove no network use.
 - **Learning:** after Apply, each moved, copied or trashed file is embedded as an `applied` example of
-  its category, in a background thread. Undo removes it again.
+  its category, in a background thread. This happens with any selected model once an index exists.
+  Undo removes the example again. Files applied without learning (e.g. before an index existed) are
+  backfilled from their stored evidence by `learn_past_decisions()` (UI: "Learn them now" on the
+  index card; CLI: `classifiles index --learn-past`). No file access is needed.
 - **Search** is a plain numpy matrix product over all vectors (≈20k × 1024 in float32 ≈ 80 MB of RAM,
   a few ms per query). No vector database is needed at this size.
-- **Evaluation** (`evaluate.py`, `classifiles eval`): holds out indexed files, classifies them like
-  inbox files (name + content, no folder), and reports accuracy, top-3, per-category recall, the most
-  common confusions, calibration buckets, and accuracy at each threshold.
+- **Evaluation** (`evaluate.py`, `classifiles eval`). Output is aggregates only, never file names.
+  - **file split:** hide single indexed files and classify them like inbox files (name + content,
+    no folder). Optimistic, because their siblings stay in the index.
+  - **folder split:** also hide every other file of the same folder. Simulates a topic that isn't
+    sorted yet.
+  - **`--decisions`:** compare with what you chose in Review. Each proposal records
+    `decided_via` (confirm / override / bulk / reject), and the current model can be re-run on the
+    stored evidence with the applied files hidden from the index. The History page shows this as
+    the Quality card.
+- **Safety guard:** `check_ready()` refuses scans and index builds when a root isn't reachable
+  (e.g. an unmounted drive). Otherwise every file would go to whatever category is left, such as
+  Delete, with high confidence.
 
 ### 4b. Laya
 

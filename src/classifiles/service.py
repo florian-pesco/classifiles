@@ -57,6 +57,20 @@ class ClassifilesService:
             self._categories = build_categories(s.roots, s.categories, s.samples_per_folder, excluded, s.delete)
         return self._categories
 
+    def unreachable_roots(self) -> list[str]:
+        """Configured roots that cannot be read right now (e.g. an unplugged or unmounted drive)."""
+        return [r["path"] for r in self.settings.roots if not Path(r["path"]).expanduser().is_dir()]
+
+    def check_ready(self) -> None:
+        """Refuse to scan or index when category folders are missing: otherwise every file would be
+        proposed for whatever is left (e.g. Delete) with high confidence."""
+        missing = self.unreachable_roots()
+        if missing:
+            raise ValueError(f"Category root not reachable: {', '.join(missing)}. "
+                             "Is the drive connected and mounted in WSL?")
+        if not any(c.usable and c.path for c in self.categories(refresh=True)):
+            raise ValueError("No category folders available. Add a root or a manual category first.")
+
     def category(self, name: str) -> Category:
         """A usable category by name (raises ValueError otherwise)."""
         for c in self.categories():
@@ -119,6 +133,7 @@ class ClassifilesService:
 
     def start_index_build(self) -> dict:
         """Build/update the example index in the background (low priority, cancellable)."""
+        self.check_ready()
         cats = self.categories(refresh=True)
         index = self.example_index()
         index.start_build(cats)
@@ -140,18 +155,51 @@ class ClassifilesService:
                                  "learned": n.get("applied", 0)})
         return {"status": index.status, "model": index.embedder.model_name,
                 "model_loaded": index.embedder.loaded, "total": sum(sum(v.values()) for v in counts.values()),
-                "categories": per_category}
+                "categories": per_category, "unlearned": len(self.unlearned_decisions())}
 
     def _learn(self, items: list[tuple[str, str, str]]) -> None:
-        """Add applied files to the example index in the background (examples backend only)."""
-        if self.settings.backend != "examples" or not items:
+        """Add applied files to the example index in the background. Happens with any model as long
+        as an index exists, so no decision is lost when switching models later."""
+        if not items:
             return
         index = self.example_index()
+        if self.settings.backend != "examples" and index.size == 0:
+            return  # no index yet: unlearned decisions can be backfilled later (learn_past_decisions)
         threading.Thread(target=lambda: _quietly(index.add, items), daemon=True).start()
 
     def _forget(self, items: list[tuple[str, str]]) -> None:
-        if self._index is not None and items:
-            self._index.remove(items)
+        if items:
+            self.example_index().remove(items)
+
+    def unlearned_decisions(self) -> list[tuple[str, str, str]]:
+        """Applied files (not undone) that are not in the index as learned examples yet, as
+        (category_key, relpath, text) built from the stored evidence. No file access needed."""
+        rows = self.store.query("""
+            SELECT m.dst, m.action, p.name, p.kind, p.evidence FROM moves m
+            JOIN proposals p ON p.id = m.proposal_id
+            WHERE m.undone_at IS NULL""")
+        learned = {(r["category_key"], r["relpath"]) for r in self.store.query(
+            "SELECT category_key, relpath FROM examples WHERE origin = 'applied' AND model = ?",
+            (self.settings.embedding_model,))}
+        out = []
+        for r in rows:
+            key, rel = _learned_key(r["dst"], r["action"])
+            if (key, rel) in learned:
+                continue
+            folder = Path(key).name if key != DELETE_KEY else "Delete"
+            out.append((key, rel, doc_text(folder, r["name"], r["kind"], r["evidence"].get("text", ""))))
+        return out
+
+    def learn_past_decisions(self) -> dict:
+        """Backfill: learn every applied file that was applied without learning (e.g. while another
+        model was selected). Uses the stored evidence only; runs in seconds."""
+        items = self.unlearned_decisions()
+        self.example_index().add(items)
+        by = {}
+        for key, _, _ in items:
+            kind = "delete" if key == DELETE_KEY else "move/copy"
+            by[kind] = by.get(kind, 0) + 1
+        return {"learned": len(items), "by_action": by}
 
     def classifier(self, inbox: str | None = None) -> Classifier:
         cats = self.categories(refresh=True, also_exclude=inbox)
@@ -190,6 +238,7 @@ class ClassifilesService:
 
         max_files defaults to settings.max_files; pass 0 to scan all files regardless."""
         inbox = str(Path(inbox).expanduser().resolve())
+        self.check_ready()
         if max_files is None:
             max_files = self.settings.max_files
         max_files = max_files or None
@@ -298,12 +347,13 @@ class ClassifilesService:
             if not target:
                 raise ValueError("Choose a category first")
             self.category(target)  # validates
-            values = {"status": "accepted", "final_target": target}
+            values = {"status": "accepted", "final_target": target,
+                      "decided_via": "confirm" if target == p["target"] else "override"}
         elif action == "reject":
-            values = {"status": "rejected"}
+            values = {"status": "rejected", "decided_via": "reject"}
         else:
             values = {"status": "suggested" if p["target"] and p["confidence"] >= self.settings.threshold
-                      else "needs_review", "final_target": p["target"]}
+                      else "needs_review", "final_target": p["target"], "decided_via": None}
         self.store.update("proposals", proposal_id, {**values, "updated_at": now()})
         return self.get_proposal(proposal_id)
 
@@ -311,7 +361,8 @@ class ClassifilesService:
         """Accept every proposal at or above the threshold. Returns how many were accepted."""
         scan_id = scan_id or self.latest_scan_id()
         cur = self.store.execute(
-            "UPDATE proposals SET status = 'accepted', updated_at = ? WHERE scan_id = ? AND status = 'suggested'",
+            "UPDATE proposals SET status = 'accepted', decided_via = 'bulk', updated_at = ? "
+            "WHERE scan_id = ? AND status = 'suggested'",
             (now(), scan_id),
         )
         return cur.rowcount

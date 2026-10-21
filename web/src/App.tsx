@@ -69,6 +69,13 @@ export default function App() {
         </div>
         {error && <div className="banner error" onClick={() => setError(null)} role="alert">{error} <span className="muted">(click to close)</span></div>}
         {notice && <div className="banner ok" onClick={() => setNotice(null)}>{notice}</div>}
+        {cats && cats.unreachable_roots?.length > 0 && (
+          <div className="banner error" role="alert">
+            Category folder not reachable: <span className="mono">{cats.unreachable_roots.join(', ')}</span>.
+            Is the drive connected? Scans and index updates are paused until it is back.
+            {' '}<button className="linkish" onClick={() => api.categories(true).then(setCats).catch(fail)}>Check again</button>
+          </div>
+        )}
         {needsSetup && page === 'review' && (
           <div className="banner info">
             No categories yet. <button className="linkish" onClick={() => setPage('categories')}>Set up categories</button> first.

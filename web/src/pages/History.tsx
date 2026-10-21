@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, humanSize, shortDate, type Batch, type Scan, type TrashItem } from '../api'
 import { Modal } from '../components/Modal'
+import { QualityCard } from '../components/QualityCard'
 import { STATUS_LABEL } from '../labels'
 
 export function HistoryPage({ openScan, notify, fail }: {
@@ -41,6 +42,8 @@ export function HistoryPage({ openScan, notify, fail }: {
 
   return (
     <div className="page">
+      <QualityCard fail={fail} />
+
       <section className="card">
         <div className="section-head"><h3>Scans</h3></div>
         {scans.length === 0 && <p className="muted small">No scans yet.</p>}

@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from classifiles.examples import DELETE_KEY, ExampleIndex, sample_folder
-from classifiles.evaluate import evaluate
+from classifiles.evaluate import evaluate, evaluate_decisions
 from classifiles.store import Store
 
 DIM = 64
@@ -128,7 +128,7 @@ def test_learns_from_apply_and_forgets_on_undo(ex_service, sorted_tree, monkeypa
 def test_evaluation_holds_files_out(ex_service, sorted_tree):
     ex_service.example_index().build(ex_service.categories(refresh=True))
     report = evaluate(ex_service, ["examples"], per_category=2)
-    r = report["results"]["examples"]
+    r = report["results"]["examples (file split)"]
     assert report["files"] == 8 and 0 <= r["accuracy"] <= 1
     assert {"range", "files", "accuracy"} <= set(r["calibration"][0])
 
@@ -169,3 +169,104 @@ def test_index_api(ex_service, sorted_tree, tmp_path):
     finance = next(c for c in st["categories"] if c["name"] == "Finance")
     assert finance["examples"] >= 4
     assert client.patch("/api/settings", json={"gpu_memory_fraction": 2}).status_code == 400
+
+
+def test_decided_via_is_recorded(ex_service, sorted_tree):
+    ex_service.example_index().build(ex_service.categories(refresh=True))
+    scan_id, rows = ex_service.scan(sorted_tree["inbox"])
+    a, b, c = rows[0], rows[1], rows[2]
+    ex_service.review(a["id"], "accept")
+    other = next(n for n in ("Finance", "Work") if n != b["target"])
+    ex_service.review(b["id"], "accept", other)
+    ex_service.review(c["id"], "reject")
+    got = {r["id"]: r["decided_via"] for r in ex_service.proposals(scan_id)}
+    assert (got[a["id"]], got[b["id"]], got[c["id"]]) == ("confirm", "override", "reject")
+    ex_service.review(c["id"], "reset")
+    assert ex_service.get_proposal(c["id"])["decided_via"] is None
+
+
+def test_folder_split_hides_siblings(ex_service, sorted_tree):
+    ex_service.example_index().build(ex_service.categories(refresh=True))
+    report = evaluate(ex_service, ["examples"], per_category=2, splits=("file", "folder"))
+    assert set(report["results"]) == {"examples (file split)", "examples (folder split)"}
+    # every category's files share one folder: with siblings hidden only the descriptions remain,
+    # so the folder split must be clearly worse than the file split
+    assert report["results"]["examples (folder split)"]["accuracy"] < report["results"]["examples (file split)"]["accuracy"]
+
+
+def test_evaluate_decisions_and_no_file_names(ex_service, sorted_tree):
+    ex_service.example_index().build(ex_service.categories(refresh=True))
+    (sorted_tree["inbox"] / "invoice_april.txt").write_text("invoice april")
+    scan_id, rows = ex_service.scan(sorted_tree["inbox"])
+    inv = next(r for r in rows if r["name"] == "invoice_april.txt")
+    ex_service.review(inv["id"], "accept", "Finance")
+    ex_service.apply(scan_id)
+    report = evaluate_decisions(ex_service)
+    assert report["decisions"] == 1 and report["decided_via"] == {"confirm": 1}
+    assert report["recorded"]["examples"]["accuracy"] == 1.0
+    assert report["current"]["files"] == 1
+    assert "invoice_april" not in repr(report)  # aggregates only
+
+
+def test_quality_api(ex_service, sorted_tree, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from classifiles_api.app import create_app
+
+    client = TestClient(create_app(ex_service, config_path=str(tmp_path / "cfg.yaml")))
+    q = client.get("/api/quality").json()
+    assert q["decisions"] == 0 and "current" not in q
+    assert client.get("/api/categories").json()["unreachable_roots"] == []
+
+
+def test_backfill_past_decisions_and_always_learn(ex_service, sorted_tree, monkeypatch):
+    # decisions made with another model (index empty): nothing is learned at apply time
+    ex_service.settings.backend = "keyword"
+    ex_service.reset_decider()
+    from classifiles.deciders import KeywordDecider
+    ex_service._decider = KeywordDecider()
+    scan_id, rows = ex_service.scan(sorted_tree["inbox"])
+    zip_ = next(r for r in rows if r["name"] == "bundle.zip")
+    txt = next(r for r in rows if r["name"] == "invoice_march.txt")
+    ex_service.review(zip_["id"], "accept", "Delete")
+    ex_service.review(txt["id"], "accept", "Finance")
+    ex_service.apply(scan_id)
+    assert len(ex_service.unlearned_decisions()) == 2
+
+    res = ex_service.learn_past_decisions()
+    assert res == {"learned": 2, "by_action": {"delete": 1, "move/copy": 1}}
+    assert ex_service.unlearned_decisions() == []
+    assert ex_service.index_status()["unlearned"] == 0
+    assert ex_service.learn_past_decisions()["learned"] == 0  # idempotent
+
+    # once an index exists, applies are learned even with another model selected
+    monkeypatch.setattr("classifiles.service.threading.Thread",
+                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+    scan_id, rows = ex_service.scan(sorted_tree["inbox"])
+    notes = next(r for r in rows if r["name"] == "meeting_notes.docx")
+    ex_service.review(notes["id"], "accept", "Work")
+    ex_service.apply(scan_id)
+    assert ex_service.unlearned_decisions() == []
+
+
+def test_decision_eval_hides_learned_deletions(ex_service, sorted_tree, monkeypatch):
+    monkeypatch.setattr("classifiles.service.threading.Thread",
+                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+    ex_service.example_index().build(ex_service.categories(refresh=True))
+    ex_service.set_categories(ex_service.settings.roots, ex_service.settings.categories,
+                              {"enabled": True, "suggest": True})
+    scan_id, rows = ex_service.scan(sorted_tree["inbox"])
+    zip_ = next(r for r in rows if r["name"] == "bundle.zip")
+    ex_service.review(zip_["id"], "accept", "Delete")
+    ex_service.apply(scan_id)  # learned as a Delete example
+    seen = {}
+    original = ex_service.example_index().query
+
+    def spy(vec, allowed, exclude_ids=None, k=None):
+        seen["excluded"] = set(exclude_ids or ())
+        return original(vec, allowed, exclude_ids, k)
+
+    monkeypatch.setattr(ex_service.example_index(), "query", spy)
+    evaluate_decisions(ex_service)
+    learned_id = ex_service.store.one("SELECT id FROM examples WHERE origin = 'applied'")["id"]
+    assert learned_id in seen["excluded"]

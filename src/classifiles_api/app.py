@@ -101,6 +101,7 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
             "roots": svc.settings.roots,
             "delete": svc.settings.delete,
             "categories": [c.to_dict() for c in svc.categories()],
+            "unreachable_roots": svc.unreachable_roots(),
         }
 
     @app.get("/api/categories")
@@ -134,6 +135,10 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     @app.post("/api/index/build")
     def index_build():
         return guard(svc.start_index_build)
+
+    @app.post("/api/index/learn-past")
+    def index_learn_past():
+        return guard(svc.learn_past_decisions)
 
     @app.post("/api/index/cancel")
     def index_cancel():
@@ -223,6 +228,13 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     @app.post("/api/apply")
     def apply(req: ScopeRequest):
         return svc.apply(req.scan_id)
+
+    @app.get("/api/quality")
+    def quality(rerun: bool = False):
+        """How right proposals were, measured against your Review decisions (aggregates only)."""
+        from classifiles.evaluate import evaluate_decisions
+
+        return guard(evaluate_decisions, svc, rerun)
 
     @app.get("/api/batches")
     def batches():
