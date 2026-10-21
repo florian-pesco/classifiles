@@ -22,6 +22,9 @@ export interface Proposal {
   final_target: string | null
   applied_action: Action | null
   applied_dst: string | null
+  suggested_subpath: string | null
+  subpath: string | null
+  new_folder: string | null
 }
 
 export interface Scan {
@@ -135,6 +138,8 @@ export interface PlannedMove {
   dst: string | null
   action: Action | null
   category: string
+  subpath: string
+  creates: string | null
   error: string | null
 }
 
@@ -201,10 +206,12 @@ export const api = {
     call<Scan>('POST', '/api/scans', { inbox, max_files: maxFiles ?? 0, only_new: onlyNew }),
 
   proposals: (scanId: number) => call<Proposal[]>('GET', `/api/proposals?${q({ scan_id: scanId })}`),
-  review: (id: number, action: 'accept' | 'reject' | 'reset', folder?: string) =>
-    call<Proposal>('PATCH', `/api/proposals/${id}`, { action, folder }),
-  acceptSuggested: (scanId: number) =>
-    call<{ accepted: number }>('POST', '/api/proposals/accept-suggested', { scan_id: scanId }),
+  review: (id: number, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) =>
+    call<Proposal>('PATCH', `/api/proposals/${id}`, { action, folder, subpath }),
+  acceptSuggested: (scanId: number, topLevel = false) =>
+    call<{ accepted: number }>('POST', '/api/proposals/accept-suggested', { scan_id: scanId, top_level: topLevel }),
+  subfolders: (category: string, path = '') =>
+    call<{ path: string; dirs: string[]; exists?: boolean }>('GET', `/api/categories/subfolders?${q({ category, path })}`),
   fileUrl: (id: number) => `/api/proposals/${id}/file`,
   openFile: (id: number, reveal = false) => call<{ ok: boolean }>('POST', `/api/proposals/${id}/open?${q({ reveal })}`),
 

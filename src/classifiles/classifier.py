@@ -22,9 +22,13 @@ class Classification:
     source: str  # "rule" or the decider's name
     alternatives: list[dict] = field(default_factory=list)  # [{"folder", "probability"}], best first
     reason: str = ""
+    neighbours: list[dict] = field(default_factory=list)  # example backend: [{category, dir, weight}]
+    vector: object = None  # example backend: query vector (not stored)
 
     def to_dict(self) -> dict:
-        return asdict(self)
+        d = asdict(self)
+        d.pop("vector", None)
+        return d
 
 
 class Classifier:
@@ -51,12 +55,13 @@ class Classifier:
             return Classification(None, 0.0, "none", reason="no categories configured")
         if self.decider is None:
             return Classification(None, 0.0, "none", reason="no rule matched and no model configured")
-        reason = ""
+        reason, extras = "", {}
         if hasattr(self.decider, "classify_evidence"):  # example-based: needs the evidence, not a prompt
-            probs, reason = self.decider.classify_evidence(ev, self.categories, **self.decider_kwargs)
+            probs, reason, extras = self.decider.classify_evidence(ev, self.categories, **self.decider_kwargs)
         else:
             probs = self.decider.choose(ev.to_state(), QUESTION, self._options)
         ranked = sorted(probs.items(), key=lambda kv: kv[1], reverse=True)
         best, p = ranked[0]
         alts = [{"folder": f, "probability": round(q, 4)} for f, q in ranked[:4]]
-        return Classification(best, round(p, 4), self.decider.name, alts, reason)
+        return Classification(best, round(p, 4), self.decider.name, alts, reason,
+                              extras.get("neighbours", []), extras.get("vector"))

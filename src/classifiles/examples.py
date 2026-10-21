@@ -73,6 +73,7 @@ class Neighbour:
     category_key: str
     relpath: str
     similarity: float
+    weight: float = 1.0  # vote weight relative to the best match (1.0 = best)
 
 
 def sample_folder(root: Path, cap: int, max_walk: int = MAX_WALK) -> list[str]:
@@ -171,7 +172,8 @@ class ExampleIndex:
             scores[key] = scores.get(key, 0.0) + float(w)
         total = sum(scores.values())
         probs = {key: s / total for key, s in scores.items()}
-        neighbours = [Neighbour(keys[key_codes[idx[t]]], relpaths[idx[t]], float(sims[t])) for t in top[:5]]
+        neighbours = [Neighbour(keys[key_codes[idx[t]]], relpaths[idx[t]], float(sims[t]), float(w))
+                      for t, w in zip(top, weights)]  # all k, best first
         return probs, neighbours
 
     # --- building -----------------------------------------------------------------------

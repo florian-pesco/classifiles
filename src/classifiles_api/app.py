@@ -27,6 +27,7 @@ class ScanRequest(BaseModel):
 class ReviewRequest(BaseModel):
     action: str  # accept | reject | reset
     folder: str | None = None
+    subpath: str | None = None  # folder inside the category; "" = top level; None = keep/suggest
 
 
 class SettingsPatch(BaseModel):
@@ -54,6 +55,11 @@ class RulesUpdate(BaseModel):
 
 class ScopeRequest(BaseModel):
     scan_id: int | None = None
+
+
+class AcceptSuggestedRequest(BaseModel):
+    scan_id: int | None = None
+    top_level: bool = False  # True: ignore subfolder suggestions, put files in the category folder
 
 
 def create_app(service: ClassifilesService | None = None, config_path: str | None = None) -> FastAPI:
@@ -144,6 +150,25 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     def index_cancel():
         return svc.cancel_index_build()
 
+    @app.get("/api/categories/subfolders")
+    def subfolders(category: str, path: str = ""):
+        """Subfolders inside a category folder (for the path editor). Only inside the category."""
+        from classifiles.paths import normalize_subpath
+
+        cat = guard(svc.category, category)
+        if cat.path is None:
+            return {"path": "", "dirs": []}
+        sub = guard(normalize_subpath, path)
+        folder = cat.path / sub if sub else cat.path
+        if not folder.is_dir():
+            return {"path": sub, "dirs": [], "exists": False}
+        try:
+            dirs = sorted((e.name for e in os.scandir(folder) if e.is_dir() and not e.name.startswith((".", "$"))),
+                          key=str.lower)
+        except PermissionError:
+            dirs = []
+        return {"path": sub, "dirs": dirs, "exists": True}
+
     # --- folder browser -----------------------------------------------------------------
 
     @app.get("/api/fs")
@@ -197,11 +222,11 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
 
     @app.patch("/api/proposals/{proposal_id}")
     def review(proposal_id: int, req: ReviewRequest):
-        return guard(svc.review, proposal_id, req.action, req.folder)
+        return guard(svc.review, proposal_id, req.action, req.folder, req.subpath)
 
     @app.post("/api/proposals/accept-suggested")
-    def accept_suggested(req: ScopeRequest):
-        return {"accepted": svc.accept_suggested(req.scan_id)}
+    def accept_suggested(req: AcceptSuggestedRequest):
+        return {"accepted": svc.accept_suggested(req.scan_id, req.top_level)}
 
     @app.get("/api/proposals/{proposal_id}/file")
     def proposal_file(proposal_id: int):
