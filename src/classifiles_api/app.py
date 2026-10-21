@@ -288,7 +288,9 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         def spa(path: str):
             if path.startswith("api/"):
                 raise HTTPException(404, f"No such endpoint: /{path}")
-            return FileResponse(WEB_DIST / "index.html")
+            # Always revalidate the page itself, so a rebuilt UI shows up on a normal reload.
+            # (The assets it references have content hashes in their names and may be cached.)
+            return FileResponse(WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app
 
