@@ -28,6 +28,9 @@ export interface Proposal {
   knn_confidence: number | null
   llm_choice: string | null
   llm_confidence: number | null
+  duplicate_of: string | null
+  duplicate_kind: 'sorted' | 'inbox' | null
+  duplicate_path: string | null
 }
 
 export interface Scan {
@@ -121,6 +124,8 @@ export interface Settings {
   ocr_images: boolean
   use_download_source: boolean
   second_opinion: boolean
+  detect_duplicates: boolean
+  duplicates_in_sorted: boolean
   llm_model: string
   llm_max_files: number
 }
@@ -143,6 +148,7 @@ export interface IndexStatus {
   total: number
   categories: { name: string; usable: boolean; examples: number; learned: number }[]
   unlearned: number
+  catalog: { state: string; message?: string; files: number; enabled: boolean; done?: number; error?: string }
 }
 
 export interface PlannedMove {
@@ -227,7 +233,8 @@ export const api = {
   subfolders: (category: string, path = '') =>
     call<{ path: string; dirs: string[]; exists?: boolean }>('GET', `/api/categories/subfolders?${q({ category, path })}`),
   fileUrl: (id: number) => `/api/proposals/${id}/file`,
-  openFile: (id: number, reveal = false) => call<{ ok: boolean }>('POST', `/api/proposals/${id}/open?${q({ reveal })}`),
+  openFile: (id: number, reveal = false, duplicate = false) =>
+    call<{ ok: boolean }>('POST', `/api/proposals/${id}/open?${q({ reveal, duplicate })}`),
 
   planApply: (scanId: number) => call<PlannedMove[]>('POST', '/api/apply/plan', { scan_id: scanId }),
   apply: (scanId: number) => call<ApplyResult>('POST', '/api/apply', { scan_id: scanId }),

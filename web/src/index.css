@@ -246,3 +246,8 @@ h3 { font-size: 15px; margin: 0; }
 .badge.so-differ { background: var(--info-bg); color: var(--accent); }
 .so-progress { margin-top: 10px; align-items: center; }
 .so-progress .progress { margin-top: 0; }
+
+/* duplicates */
+.duplicate { display: flex; align-items: center; gap: 8px; margin-top: 4px; flex-wrap: wrap; }
+.badge.dup { background: var(--warn-bg); color: var(--warn); }
+.chip.dup-chip { border-color: var(--warn); color: var(--warn); }

@@ -52,6 +52,10 @@ CREATE TABLE IF NOT EXISTS proposals (
     knn_confidence REAL,                -- example model's confidence before a second opinion
     llm_choice TEXT,                    -- category the language model chose (second opinion)
     llm_confidence REAL,                -- its probability for that choice
+    duplicate_of TEXT,                  -- identical file: "Category/path" (sorted) or inbox file name
+    duplicate_kind TEXT,                -- sorted | inbox
+    duplicate_path TEXT,                -- absolute path of that identical file
+    content_hash TEXT,                  -- full hash, if the file was hashed
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
@@ -68,6 +72,18 @@ CREATE TABLE IF NOT EXISTS moves (
     undone_at TEXT,
     purged_at TEXT                        -- delete only: trash emptied, no longer undoable
 );
+-- Every file in the category folders, for duplicate detection (see duplicates.py).
+CREATE TABLE IF NOT EXISTS catalog (
+    id INTEGER PRIMARY KEY,
+    category_key TEXT NOT NULL,
+    relpath TEXT NOT NULL,
+    size INTEGER NOT NULL,
+    mtime REAL NOT NULL,
+    quick_hash TEXT,                      -- first 64 KB + size, computed on demand
+    full_hash TEXT,                       -- whole file, computed on demand
+    UNIQUE (category_key, relpath)
+);
+CREATE INDEX IF NOT EXISTS catalog_size ON catalog(size);
 -- Already-sorted files used as examples by the example-based classifier (see examples.py).
 CREATE TABLE IF NOT EXISTS examples (
     id INTEGER PRIMARY KEY,
@@ -103,6 +119,10 @@ MIGRATIONS = [
     ("scans", "llm_total", "INTEGER NOT NULL DEFAULT 0"),
     ("scans", "llm_done", "INTEGER NOT NULL DEFAULT 0"),
     ("scans", "llm_error", "TEXT"),
+    ("proposals", "duplicate_of", "TEXT"),
+    ("proposals", "duplicate_kind", "TEXT"),
+    ("proposals", "duplicate_path", "TEXT"),
+    ("proposals", "content_hash", "TEXT"),
 ]
 
 JSON_FIELDS = ("evidence", "alternatives", "neighbours")
@@ -153,6 +173,8 @@ class Store:
         return self.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", values).lastrowid
 
     def update(self, table: str, id: int, values: dict) -> None:
+        values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS and v is not None else v
+                  for k, v in values.items()}
         sets = ", ".join(f"{k} = :{k}" for k in values)
         self.execute(f"UPDATE {table} SET {sets} WHERE id = :id", {**values, "id": id})
 

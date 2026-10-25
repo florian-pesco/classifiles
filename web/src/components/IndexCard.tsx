@@ -75,6 +75,15 @@ export function IndexCard({ active, notify, fail }: {
           {s.reused ?? 0} unchanged, {s.removed ?? 0} removed.
         </p>
       )}
+      {st.catalog?.enabled && (
+        <p className="small muted">
+          Duplicate check: {st.catalog.state === 'running'
+            ? `${st.catalog.message ?? 'listing files'}…`
+            : st.catalog.files
+              ? `${st.catalog.files.toLocaleString()} files in your folders are listed, so inbox files that already exist there are found.`
+              : 'not listed yet. Update the index to also find inbox files that already exist in your folders.'}
+        </p>
+      )}
       <ul className="simple-list">
         {st.categories.filter(c => c.usable).map(c => (
           <li key={c.name}>

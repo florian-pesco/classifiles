@@ -217,6 +217,20 @@ for each category folder:                                 query text = file name
 - **Learning:** applied files are learned with their path inside the category
   (`moves.category_key` + relative path), so later suggestions include folders created on Apply.
 
+### 4e. Duplicates (`duplicates.py`)
+
+- **Exact only:** byte-for-byte identical content. Candidates narrow in three steps: same size →
+  same quick hash (first 64 KB + size) → same full BLAKE2b hash. Files with a unique size are never
+  read.
+- **Catalog:** the SQLite table `catalog` lists every file in the folder categories (size, mtime,
+  cached hashes). It's built in the index thread after the example index (Update index,
+  incremental by size/mtime). Apply adds moved/copied files with their hash; undo removes them.
+- **Scan:** `_mark_duplicates` checks all inbox files (not only the scanned ones) within the inbox and
+  against the catalog. Within the inbox the copy to keep comes first (`original_first`: no
+  "(1)"/"Kopie"/"Copy" marker, then oldest, then shortest name); the others are duplicates of it. A
+  duplicate becomes a Delete proposal (`source = "duplicate"`, confidence 1.0) if Delete is enabled;
+  otherwise it is only flagged. Its trash move isn't learned.
+
 ### 4d. Second opinion (`llm.py`, `llm_worker.py`)
 
 - **Gating:** example-model proposals below the threshold, with ≥150 characters of text or a file name

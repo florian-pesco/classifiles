@@ -45,6 +45,8 @@ class SettingsPatch(BaseModel):
     ocr_images: bool | None = None
     use_download_source: bool | None = None
     second_opinion: bool | None = None
+    detect_duplicates: bool | None = None
+    duplicates_in_sorted: bool | None = None
     llm_model: str | None = None
     llm_max_files: int | None = None
 
@@ -252,9 +254,16 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         return FileResponse(path, content_disposition_type="inline", filename=path.name)
 
     @app.post("/api/proposals/{proposal_id}/open")
-    def open_file(proposal_id: int, reveal: bool = False):
-        """Open the file with its Windows default app, or show it in Explorer (reveal=true)."""
-        path = guard(svc.current_path, proposal_id)
+    def open_file(proposal_id: int, reveal: bool = False, duplicate: bool = False):
+        """Open the file with its Windows default app, or show it in Explorer (reveal=true).
+        duplicate=true: the identical file this one duplicates (only that recorded path)."""
+        if duplicate:
+            p = guard(svc.get_proposal, proposal_id)
+            if not p.get("duplicate_path"):
+                raise HTTPException(404, "This file has no recorded duplicate")
+            path = Path(p["duplicate_path"])
+        else:
+            path = guard(svc.current_path, proposal_id)
         if not path.exists():
             raise HTTPException(404, f"File not found: {path}")
         _open_in_windows(path, reveal)

@@ -11,6 +11,7 @@ import { Preview } from '../components/Preview'
 import { STATUS_LABEL } from '../labels'
 
 const APPLIED_LABEL = { move: 'Moved', copy: 'Copied', delete: 'In trash' } as const
+type Filter = Status | 'all' | 'duplicates'
 const FILTERS: (Status | 'all')[] = ['all', 'needs_review', 'suggested', 'accepted', 'rejected', 'moved']
 
 type SortKey = 'confidence' | 'confidence_asc' | 'name' | 'category' | 'kind' | 'size' | 'modified'
@@ -53,7 +54,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [scans, setScans] = useState<Scan[]>([])
   const [scan, setScan] = useState<Scan | null>(null)
   const [proposals, setProposals] = useState<Proposal[]>([])
-  const [filter, setFilter] = useState<Status | 'all'>('all')
+  const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortKey>('confidence')
   const [inbox, setInbox] = useState(settings.inboxes[0] ?? '')
@@ -100,15 +101,18 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   }, [scan, fail, loadScans])
 
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: proposals.length }
-    for (const p of proposals) c[p.status] = (c[p.status] ?? 0) + 1
+    const c: Record<string, number> = { all: proposals.length, duplicates: 0 }
+    for (const p of proposals) {
+      c[p.status] = (c[p.status] ?? 0) + 1
+      if (p.duplicate_of) c.duplicates += 1
+    }
     return c
   }, [proposals])
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
     const rows = proposals.filter(p =>
-      (filter === 'all' || p.status === filter) &&
+      (filter === 'all' || (filter === 'duplicates' ? !!p.duplicate_of : p.status === filter)) &&
       (!needle || p.name.toLowerCase().includes(needle) || (p.final_target ?? '').toLowerCase().includes(needle)))
     return sortRows(rows, sort)
   }, [proposals, filter, search, sort])
@@ -245,6 +249,11 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             {f === 'all' ? 'All' : STATUS_LABEL[f]} <span className="count">{counts[f] ?? 0}</span>
           </button>
         ))}
+        {counts.duplicates > 0 && (
+          <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
+            Duplicates <span className="count">{counts.duplicates}</span>
+          </button>
+        )}
         <span className="grow" />
         {scan && !running && scan.total < scan.inbox_total && (
           <span className="muted small">{scan.total} of {scan.inbox_total} inbox files ·</span>
@@ -336,6 +345,15 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
           {viaOcr && <> · <span title="Text read by OCR (scanned PDF)">OCR</span></>}
           {' · '}<button className="linkish" onClick={onPreview}>preview</button>
         </div>
+        {p.duplicate_of && (
+          <div className="duplicate small">
+            <span className="badge dup" title="Byte-for-byte identical content">
+              {p.duplicate_kind === 'sorted' ? 'already in your folders' : 'duplicate in inbox'}
+            </span>
+            <span className="mono">{p.duplicate_of}</span>
+            <button className="linkish" onClick={() => api.openFile(p.id, true, true).catch(() => undefined)}>show it</button>
+          </div>
+        )}
         {p.llm_choice && (
           <div className="second-opinion small">
             {llmAgrees
