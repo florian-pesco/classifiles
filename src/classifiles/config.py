@@ -76,6 +76,12 @@ class Settings:
     ocr_pdf_pages: int = 2              # scanned PDFs without text: read this many first pages by OCR (0 = off)
     ocr_images: bool = True             # read text in images by OCR
     use_download_source: bool = True    # Windows download note -> website domain (local, domain only)
+    # Image similarity: inbox pictures are compared with pictures already sorted into the
+    # categories (local image model, built with "Update index"). Combined with the text result.
+    image_similarity: bool = True
+    image_model: str = "google/siglip2-base-patch16-224"
+    images_per_category: int = 300
+    image_weight: float = 0.5           # 0 = text only, 1 = image similarity only (for images)
     # Exact duplicates (identical content): inbox files that already exist in a category folder or
     # several times in the inbox are proposed for Delete. Sorted folders need the file list, which
     # is built with "Update index".

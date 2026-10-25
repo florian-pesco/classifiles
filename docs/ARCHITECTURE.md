@@ -217,6 +217,25 @@ for each category folder:                                 query text = file name
 - **Learning:** applied files are learned with their path inside the category
   (`moves.category_key` + relative path), so later suggestions include folders created on Apply.
 
+### 4f. Pictures (`image_index.py`)
+
+- **Model:** the image part of SigLIP2-base (`SiglipVisionModel`, 93M parameters, fp16, ≈0.2–0.3 GB GPU
+  memory, ~60 ms per picture in a batch). It loads lazily and runs offline after the one-time download.
+- **Index:** table `image_examples`. Up to `images_per_category` pictures per category, sampled evenly
+  over subfolders, files > 40 MB skipped, JPEGs decoded at reduced size (draft mode). Built in the
+  index thread after the text index and the duplicate catalog; incremental by mtime, batches of 32
+  with pauses, cancellable. Applied pictures are learned; undo removes them.
+- **Classification:** for an inbox picture, the 10 nearest sorted pictures vote (weights
+  `exp((sim − best) / 0.02)`). This is combined with the text result:
+  `P ∝ P_text^(1−w) · P_image^w`, `w = image_weight` (default 0.5). The nearest pictures also vote
+  for the folder inside the category; the reason shows "looks like: …".
+- **Measured** (`evaluate_images`, 192 held-out sorted pictures):
+  - text only 75% / 65% (file / folder split) → combined **81% / 74%**;
+  - at confidence ≥ 0.8, 82% of pictures were suggested, 91% of them right (text only: 59%, 87%).
+
+  On 27 real picture decisions it was neutral (19 → 18 right; it lost on 03_Arbeit, whose sorted
+  pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
+
 ### 4e. Duplicates (`duplicates.py`)
 
 - **Exact only:** byte-for-byte identical content. Candidates narrow in three steps: same size →

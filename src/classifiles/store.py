@@ -72,6 +72,16 @@ CREATE TABLE IF NOT EXISTS moves (
     undone_at TEXT,
     purged_at TEXT                        -- delete only: trash emptied, no longer undoable
 );
+-- Pictures already sorted into the categories, as image vectors (see image_index.py).
+CREATE TABLE IF NOT EXISTS image_examples (
+    id INTEGER PRIMARY KEY,
+    category_key TEXT NOT NULL,
+    relpath TEXT NOT NULL,
+    mtime REAL NOT NULL DEFAULT 0,
+    model TEXT NOT NULL,
+    vector BLOB NOT NULL,                 -- float16, L2-normalised
+    UNIQUE (category_key, relpath, model)
+);
 -- Every file in the category folders, for duplicate detection (see duplicates.py).
 CREATE TABLE IF NOT EXISTS catalog (
     id INTEGER PRIMARY KEY,

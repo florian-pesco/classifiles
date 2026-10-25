@@ -61,6 +61,7 @@ def settings(tree) -> Settings:
         categories=[{"path": str(tree["root"] / k), "description": d} for k, d in DESCRIPTIONS.items()],
         rules=[{"kind": "installer", "folder": "Software"}],
         db_path=":memory:",
+        image_similarity=False,  # tests that need it use a fake image model
     )
 
 

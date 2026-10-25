@@ -124,6 +124,9 @@ export interface Settings {
   ocr_images: boolean
   use_download_source: boolean
   second_opinion: boolean
+  image_similarity: boolean
+  image_weight: number
+  images_per_category: number
   detect_duplicates: boolean
   duplicates_in_sorted: boolean
   llm_model: string
@@ -149,6 +152,8 @@ export interface IndexStatus {
   categories: { name: string; usable: boolean; examples: number; learned: number }[]
   unlearned: number
   catalog: { state: string; message?: string; files: number; enabled: boolean; done?: number; error?: string }
+  images: { enabled: boolean; state?: string; message?: string; total?: number; done?: number; error?: string;
+            per_category?: Record<string, number> }
 }
 
 export interface PlannedMove {
