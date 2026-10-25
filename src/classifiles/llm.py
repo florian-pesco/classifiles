@@ -2,12 +2,14 @@
 
 The example model proposes categories with probabilities. For gated files (below the threshold,
 with usable evidence), the language model gets the file plus the top-3 candidate categories, each
-with its most similar already-sorted files, and picks one letter. Both opinions are combined:
+with its most similar already-sorted files, and picks one letter. It is asked once per rotation
+of the option order and the answers are averaged, which removes its preference for certain
+letters.
 
-    P(c) ∝ P_examples(c)^(1−w) · P_llm(c)^w      over the candidates
-
-so agreement raises the confidence and disagreement keeps it low. The model runs in its own
-process (llm_worker.py), started for the step and stopped afterwards.
+The answer is a review hint ("both agree" / "suggests X"), not a change of confidence. Measured on
+real data, blending it into the confidence also raised wrong answers above the threshold for
+files of unsorted topics (see evaluate_second_opinion; `combine` is kept for that comparison).
+The model runs in its own process (llm_worker.py), started for the step and stopped afterwards.
 """
 
 from __future__ import annotations
@@ -36,11 +38,12 @@ class LLMError(RuntimeError):
 class LLMClient:
     """Runs llm_worker.py as a child process and asks it questions over stdin/stdout."""
 
-    def __init__(self, model: str, gpu_fraction: float = 0.7, threads: int = 2):
+    def __init__(self, model: str, gpu_fraction: float = 0.7, threads: int = 2, cmd: list[str] | None = None):
         self.model = model
+        cmd = cmd or [sys.executable, "-m", "classifiles.llm_worker", "--model", model,
+                      "--gpu-fraction", str(gpu_fraction), "--threads", str(threads)]
         self._proc = subprocess.Popen(
-            [sys.executable, "-m", "classifiles.llm_worker", "--model", model,
-             "--gpu-fraction", str(gpu_fraction), "--threads", str(threads)],
+            cmd,
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
         self._next = 0
         ready = self._read(READY_TIMEOUT)

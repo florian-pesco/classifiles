@@ -199,7 +199,20 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             {running ? 'Scanning…' : 'Scan & classify'}
           </button>
         </div>
-        {running && scan && (
+        {running && scan?.phase === 'second_opinion' && (
+          <div className="row-form so-progress">
+            <div className="progress grow" role="progressbar" aria-valuenow={scan.llm_done} aria-valuemax={scan.llm_total}>
+              <div style={{ width: `${scan.llm_total ? (100 * scan.llm_done) / scan.llm_total : 0}%` }} />
+              <span>
+                {scan.llm_done === 0 ? 'Starting the language model (first time: one-time download)…'
+                  : `Second opinion on unsure files: ${scan.llm_done} / ${scan.llm_total}`}
+              </span>
+            </div>
+            <button onClick={() => api.cancelSecondOpinion().catch(fail)}>Skip</button>
+          </div>
+        )}
+        {scan?.llm_error && <div className="banner error">Second opinion stopped: {scan.llm_error}</div>}
+        {running && scan && scan.phase !== 'second_opinion' && (
           <div className="progress" role="progressbar" aria-valuenow={scan.processed} aria-valuemax={scan.total}>
             <div style={{ width: `${scan.total ? (100 * scan.processed) / scan.total : 0}%` }} />
             <span>{scan.processed} / {scan.total} files
@@ -310,6 +323,7 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
   const looks = p.evidence.meta?.looks_like as string | undefined
   const source = p.evidence.meta?.source as string | undefined
   const viaOcr = String(p.evidence.meta?.note ?? '').startsWith('text read by OCR')
+  const llmAgrees = !!p.llm_choice && p.llm_choice === p.final_target
   const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
 
   return (
@@ -322,6 +336,20 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
           {viaOcr && <> · <span title="Text read by OCR (scanned PDF)">OCR</span></>}
           {' · '}<button className="linkish" onClick={onPreview}>preview</button>
         </div>
+        {p.llm_choice && (
+          <div className="second-opinion small">
+            {llmAgrees
+              ? <span className="badge so-agree" title="The language model chose the same category">✓ both agree</span>
+              : (
+                <>
+                  <span className="badge so-differ" title="The language model chose a different category">2nd opinion: {p.llm_choice}</span>
+                  {!done && (
+                    <button className="linkish" onClick={() => onReview(p, 'accept', p.llm_choice!)}>use it</button>
+                  )}
+                </>
+              )}
+          </div>
+        )}
         {open && (
           <div className="details small">
             {p.reason && <div><b>Why:</b> {p.reason}</div>}

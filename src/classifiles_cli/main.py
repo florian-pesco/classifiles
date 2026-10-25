@@ -219,6 +219,8 @@ def eval_(
     split: list[str] = typer.Option(["file", "folder"], "--split",
                                     help="file: hide single files; folder: hide whole folders (new topics)"),
     decisions: bool = typer.Option(False, "--decisions", help="Measure against your real Review decisions instead"),
+    second_opinion: bool = typer.Option(False, "--second-opinion",
+                                        help="Measure the language model hint on unsure files (decisions + folder split)"),
     seed: int = 0,
     config: Optional[Path] = ConfigOpt,
 ):
@@ -226,6 +228,20 @@ def eval_(
     from classifiles.evaluate import evaluate, evaluate_decisions
 
     svc = _service(config)
+    if second_opinion:
+        from classifiles.evaluate import evaluate_second_opinion
+
+        for source in ("decisions", "folder"):
+            r = evaluate_second_opinion(svc, source=source, per_category=per_category, seed=seed)
+            a = r["agreement"]
+            agree_rate = f"{a['agree_right'] / a['agree']:.0%}" if a["agree"] else "—"
+            console.print(f"[bold]{source}[/]: {r['files']} files, {r['gated']} unsure files asked "
+                          f"({r['model']}, {r['seconds_per_file']} s/file, {r['model_gpu_gb']} GB)")
+            console.print(f"  both agree: {a['agree']} files, first choice right in {agree_rate}")
+            console.print(f"  they disagree: {a['disagree']} files, example model right {a['disagree_example_right']}, "
+                          f"language model right {a['disagree_llm_right']}\n")
+            svc = _service(config)  # fresh service: the embedder was unloaded for the model
+        return
     if decisions:
         report = evaluate_decisions(svc)
         console.print(f"[bold]{report['decisions']} decided files[/] (how: {report['decided_via']})\n")

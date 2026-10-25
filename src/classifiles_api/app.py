@@ -44,6 +44,9 @@ class SettingsPatch(BaseModel):
     ocr_pdf_pages: int | None = None
     ocr_images: bool | None = None
     use_download_source: bool | None = None
+    second_opinion: bool | None = None
+    llm_model: str | None = None
+    llm_max_files: int | None = None
 
 
 class CategoriesUpdate(BaseModel):
@@ -95,6 +98,8 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
             values["max_files"] = values["max_files"] or None
         if "ocr_pdf_pages" in values and not 0 <= values["ocr_pdf_pages"] <= 5:
             raise HTTPException(400, "ocr_pdf_pages must be between 0 and 5")
+        if "llm_max_files" in values and not 1 <= values["llm_max_files"] <= 1000:
+            raise HTTPException(400, "llm_max_files must be between 1 and 1000")
         if "gpu_memory_fraction" in values and not 0.05 <= values["gpu_memory_fraction"] <= 0.9:
             raise HTTPException(400, "gpu_memory_fraction must be between 0.05 and 0.9")
         if {"backend", "laya_model"} & set(values):
@@ -209,6 +214,12 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
 
         threading.Thread(target=run, daemon=True).start()
         return svc.get_scan(scan_id)
+
+    @app.post("/api/scans/second-opinion/cancel")
+    def cancel_second_opinion():
+        """Stop the second-opinion step of a running scan (files checked so far keep their hint)."""
+        svc.cancel_second_opinion()
+        return {"ok": True}
 
     @app.get("/api/scans")
     def scans():

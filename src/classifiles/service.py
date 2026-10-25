@@ -360,7 +360,7 @@ class ClassifilesService:
         return out
 
     def ask_second_opinion(self, client, p: dict) -> dict:
-        """Combined probabilities over the candidates of one proposal, plus the LLM's own answer."""
+        """The language model's probabilities over the candidates of one proposal ({"p_llm": …})."""
         cats = {c.name: c for c in self.categories()}
         names = llm.candidates(p["alternatives"])
         options = {n: {"name": n, "description": cats[n].description if n in cats else "",
@@ -375,13 +375,12 @@ class ClassifilesService:
             probs = client.choose(llm.build_prompt(p["_ev"], [options[n] for n in order]), letters)
             for n, letter in zip(order, letters):
                 p_llm[n] += probs[letter] / rotations
-        p_ex = {a["folder"]: a["probability"] for a in p["alternatives"]}
-        combined = llm.combine(p_ex, p_llm, self.settings.llm_weight)
-        return {"p_llm": p_llm, "combined": combined}
+        return {"p_llm": p_llm}
 
     def run_second_opinion(self, scan_id: int, proposals: list[dict], threshold: float) -> int:
-        """Ask the local language model about unsure proposals and update them. Returns how many
-        were checked. The model runs in its own process, which is stopped afterwards."""
+        """Ask the local language model about unsure proposals and record its answer as a review
+        hint. Returns how many were checked. The model runs in its own process, which is stopped
+        afterwards."""
         todo = self.second_opinion_candidates(proposals, threshold)
         if not todo:
             return 0
@@ -396,7 +395,7 @@ class ClassifilesService:
                 for p in todo:
                     if self._llm_cancel.is_set():
                         break
-                    self._apply_second_opinion(p, self.ask_second_opinion(client, p), threshold)
+                    self._record_second_opinion(p, self.ask_second_opinion(client, p))
                     done += 1
                     self.store.update("scans", scan_id, {"llm_done": done})
         except llm.LLMError as e:
@@ -406,26 +405,18 @@ class ClassifilesService:
     def cancel_second_opinion(self) -> None:
         self._llm_cancel.set()
 
-    def _apply_second_opinion(self, p: dict, answer: dict, threshold: float) -> None:
-        combined, p_llm = answer["combined"], answer["p_llm"]
-        best = max(combined, key=combined.get)
-        llm_best = max(p_llm, key=p_llm.get)
-        others = [a for a in p["alternatives"] if a["folder"] not in combined]
-        alternatives = sorted(({"folder": n, "probability": round(v, 4)} for n, v in combined.items()),
-                              key=lambda a: -a["probability"]) + others
-        values = {
-            "knn_confidence": p["confidence"], "llm_choice": llm_best, "llm_confidence": round(p_llm[llm_best], 4),
-            "confidence": round(combined[best], 4), "alternatives": alternatives,
-            "status": "suggested" if combined[best] >= threshold else "needs_review",
-            "reason": (p["reason"] + "; " if p["reason"] else "") +
-                      f"second opinion: {llm_best} ({p_llm[llm_best]:.2f})",
+    def _record_second_opinion(self, p: dict, answer: dict) -> None:
+        """Store the language model's answer as a hint. Deliberately does NOT change the proposal's
+        category, confidence or status: in testing, agreement was a good sign on real inbox files
+        but raised confidence for wrong answers on files of unsorted topics."""
+        p_llm = answer["p_llm"]
+        choice = max(p_llm, key=p_llm.get)
+        note = "agrees" if choice == p["target"] else f"suggests {choice}"
+        self.store.update("proposals", p["id"], {
+            "llm_choice": choice, "llm_confidence": round(p_llm[choice], 4), "knn_confidence": p["confidence"],
+            "reason": (p["reason"] + "; " if p["reason"] else "") + f"second opinion {note} ({p_llm[choice]:.2f})",
             "updated_at": now(),
-        }
-        if best != p["target"]:
-            subpath, new_folder, _ = self._folder_for(best, p["neighbours"] or [], p["name"])
-            values.update({"target": best, "final_target": best, "suggested_subpath": subpath,
-                           "subpath": subpath, "new_folder": new_folder})
-        self.store.update("proposals", p["id"], values)
+        })
 
     def _suggest_new_folders(self, candidates: list[dict], min_similarity: float = 0.8) -> None:
         """Propose a new subfolder for files whose similar files are spread over many subfolders.
