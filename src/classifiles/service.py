@@ -15,6 +15,7 @@ from .deciders import Decider, make_decider
 from .deciders.examples import ExampleDecider
 from .embedder import Embedder
 from . import llm
+from .duplicates import Catalog, find_duplicates
 from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
@@ -48,6 +49,7 @@ class ClassifilesService:
         self._index: ExampleIndex | None = None
         self._llm_cancel = threading.Event()
         self.store = store or Store(self.settings.db_path)
+        self._catalog = Catalog(self.store)
 
     # --- categories, rules & model -----------------------------------------------------------
 
@@ -141,10 +143,19 @@ class ClassifilesService:
         self.check_ready()
         cats = self.categories(refresh=True)
         index = self.example_index()
-        index.start_build(cats)
+        # the file list for duplicate detection is refreshed in the same background thread
+        after = (lambda: self._catalog.build(cats)) if self._catalog_wanted() else None
+        index.start_build(cats, on_done=after)
         return self.index_status()
 
+    def _catalog_wanted(self) -> bool:
+        return self.settings.detect_duplicates and self.settings.duplicates_in_sorted
+
+    def catalog(self) -> Catalog:
+        return self._catalog
+
     def cancel_index_build(self) -> dict:
+        self._catalog.cancel()
         if self._index:
             self._index.cancel()
         return self.index_status()
@@ -160,7 +171,9 @@ class ClassifilesService:
                                  "learned": n.get("applied", 0)})
         return {"status": index.status, "model": index.embedder.model_name,
                 "model_loaded": index.embedder.loaded, "total": sum(sum(v.values()) for v in counts.values()),
-                "categories": per_category, "unlearned": len(self.unlearned_decisions())}
+                "categories": per_category, "unlearned": len(self.unlearned_decisions()),
+                "catalog": {**self._catalog.status, "files": self._catalog.count(),
+                            "enabled": self._catalog_wanted()}}
 
     def _learn(self, items: list[tuple[str, str, str]]) -> None:
         """Add applied files to the example index in the background. Happens with any model as long
@@ -280,6 +293,9 @@ class ClassifilesService:
             if candidates:
                 self._suggest_new_folders(candidates)
                 out = [self.get_proposal(p["id"]) for p in out]
+            if self.settings.detect_duplicates and out:
+                self._mark_duplicates(scan["inbox"], out)
+                out = [self.get_proposal(p["id"]) for p in out]
             if self.settings.second_opinion and self.settings.backend == "examples":
                 if self.run_second_opinion(scan_id, out, scan["threshold"]):
                     out = [self.get_proposal(p["id"]) for p in out]
@@ -321,6 +337,33 @@ class ClassifilesService:
         if container and c.vector is not None:
             candidate = {"id": pid, "category": c.target, "parent": subpath, "name": ev.name, "vector": c.vector}
         return self.get_proposal(pid), candidate
+
+    def _mark_duplicates(self, inbox: str, proposals: list[dict]) -> None:
+        """Find exact duplicates (within the whole inbox, and against the sorted folders) and
+        propose them for Delete. The copy to keep stays a normal proposal."""
+        cats = [c for c in self.categories() if c.usable and c.path is not None]
+        labels = {category_key(c): c.name for c in cats}
+        catalog = self._catalog if self.settings.duplicates_in_sorted else None
+        dups, hashes = find_duplicates(self.list_inbox(inbox), catalog, labels)
+        delete = next((c for c in self.categories() if c.source == "delete" and c.usable), None)
+        for p in proposals:
+            path = Path(p["path"])
+            d = dups.get(path)
+            if d is None:
+                if path in hashes:
+                    self.store.update("proposals", p["id"], {"content_hash": hashes[path]})
+                continue
+            where = "in your folders" if d.kind == "sorted" else "in the inbox"
+            values = {"duplicate_of": d.of, "duplicate_kind": d.kind, "duplicate_path": d.path,
+                      "content_hash": d.content_hash, "updated_at": now(),
+                      "reason": f"identical to {d.of} ({where})"}
+            if delete is not None:
+                values.update({"target": delete.name, "final_target": delete.name, "confidence": 1.0,
+                               "source": "duplicate", "status": "suggested", "subpath": "",
+                               "suggested_subpath": "", "new_folder": None,
+                               "alternatives": [{"folder": delete.name, "probability": 1.0}] +
+                                               [a for a in p["alternatives"] if a["folder"] != delete.name][:3]})
+            self.store.update("proposals", p["id"], values)
 
     def _folder_for(self, target: str | None, neighbours: list[dict], filename: str) -> tuple[str, str | None, bool]:
         """(subpath, new_folder, is_container) for a file in category `target` (see paths.py)."""
@@ -550,9 +593,67 @@ class ClassifilesService:
 
     def _plan(self, p: dict):
         try:
-            return plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or ""), None
+            m = plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or "")
         except (MoveError, ValueError) as e:
             return None, str(e)
+        if p["source"] == "duplicate" and m.action == "delete":
+            problem = self._duplicate_problem(p)
+            if problem:
+                return None, f"Not deleted: {problem}"
+        return m, None
+
+    def _duplicate_problem(self, p: dict) -> str | None:
+        """Safety check right before a duplicate goes to the trash: the identical copy must still
+        exist and still be identical. Returns a reason if not."""
+        from .duplicates import full_hash
+
+        other = Path(p["duplicate_path"]) if p.get("duplicate_path") else None
+        if other is None or not other.is_file():
+            return f"the identical copy is gone ({p.get('duplicate_of') or 'unknown'})"
+        try:
+            if other.stat().st_size != Path(p["path"]).stat().st_size or full_hash(other) != full_hash(Path(p["path"])):
+                return f"{p['duplicate_of']} has changed and is no longer identical"
+        except OSError as e:
+            return f"could not read the files ({e})"
+        return None
+
+    def duplicate_details(self, proposal_id: int) -> dict:
+        """Facts behind a duplicate proposal, with both files re-checked now."""
+        from datetime import datetime
+
+        from .duplicates import copy_marked, full_hash
+
+        p = self.get_proposal(proposal_id)
+        if not p.get("duplicate_path"):
+            raise ValueError("This file is not marked as a duplicate")
+
+        def side(path: Path, label: str) -> dict:
+            info = {"label": label, "exists": path.is_file()}
+            if info["exists"]:
+                st = path.stat()
+                info.update({"size": st.st_size,
+                             "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                             "fingerprint": full_hash(path)})
+            return info
+
+        this = side(self.current_path(proposal_id), p["name"])
+        other = side(Path(p["duplicate_path"]), p["duplicate_of"])
+        identical = this["exists"] and other["exists"] and this["size"] == other["size"] \
+            and this["fingerprint"] == other["fingerprint"]
+        if p["duplicate_kind"] == "sorted":
+            keep = "The other copy is already sorted in your folders, so the inbox copy is the one to remove."
+        else:
+            why = []
+            if copy_marked(p["name"]) and not copy_marked(Path(p["duplicate_path"]).name):
+                why.append("this name looks like a copy (e.g. \"(1)\", \"Kopie\")")
+            if this.get("modified") and other.get("modified") and this["modified"] > other["modified"]:
+                why.append("the other copy is older")
+            keep = ("The other copy is kept because " + " and ".join(why) + ".") if why else \
+                "The other copy is kept (shorter or earlier name)."
+        return {"kind": p["duplicate_kind"], "this": this, "other": other, "identical_now": identical,
+                "keep_reason": keep,
+                "method": "Same size in bytes and the same BLAKE2b fingerprint (128-bit) of the entire content. "
+                          "Names and dates don't matter."}
 
     def plan_apply(self, scan_id: int | None = None) -> list[dict]:
         """Dry run: what apply() would do for accepted proposals, including problems."""
@@ -588,8 +689,11 @@ class ClassifilesService:
             moved.append({"proposal_id": p["id"], "src": str(m.src), "dst": str(m.dst), "action": m.action,
                           "created_dir": str(m.created_dir) if m.created_dir else None})
             key, rel = _learned_key(str(m.dst), m.action, cat_key)
-            learned.append((key, rel, doc_text(_learned_folder(key, rel), p["name"], p["kind"],
-                                               p["evidence"].get("text", ""))))
+            if p["source"] != "duplicate":  # a duplicate isn't junk by its kind: don't learn it as Delete
+                learned.append((key, rel, doc_text(_learned_folder(key, rel), p["name"], p["kind"],
+                                                   p["evidence"].get("text", ""))))
+            if m.action != "delete" and key != DELETE_KEY:
+                self._catalog.add(key, rel, m.dst, p.get("content_hash"))
             if m.created_dir:
                 self.invalidate()  # a new folder exists now: refresh the cached categories
         self._learn(learned)
@@ -630,6 +734,8 @@ class ClassifilesService:
                 self.store.update("proposals", m["proposal_id"], {"status": "accepted", "updated_at": now()})
             restored.append({"move_id": m["id"], "path": m["src"]})
             forget.append(_learned_key(m["dst"], m["action"], m["category_key"]))
+            if m["action"] != "delete":
+                self._catalog.remove(*forget[-1])
         self._forget(forget)
         return {"batch_id": batch_id, "restored": restored, "errors": errors}
 

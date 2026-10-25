@@ -45,6 +45,8 @@ class SettingsPatch(BaseModel):
     ocr_images: bool | None = None
     use_download_source: bool | None = None
     second_opinion: bool | None = None
+    detect_duplicates: bool | None = None
+    duplicates_in_sorted: bool | None = None
     llm_model: str | None = None
     llm_max_files: int | None = None
 
@@ -245,16 +247,35 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         return {"accepted": svc.accept_suggested(req.scan_id, req.top_level)}
 
     @app.get("/api/proposals/{proposal_id}/file")
-    def proposal_file(proposal_id: int):
-        path = guard(svc.current_path, proposal_id)
+    def proposal_file(proposal_id: int, duplicate: bool = False):
+        """The file itself, for preview; duplicate=true: the identical file it duplicates."""
+        if duplicate:
+            p = guard(svc.get_proposal, proposal_id)
+            if not p.get("duplicate_path"):
+                raise HTTPException(404, "This file has no recorded duplicate")
+            path = Path(p["duplicate_path"])
+        else:
+            path = guard(svc.current_path, proposal_id)
         if not path.is_file():
             raise HTTPException(404, f"File not found: {path}")
         return FileResponse(path, content_disposition_type="inline", filename=path.name)
 
+    @app.get("/api/proposals/{proposal_id}/duplicate")
+    def duplicate_details(proposal_id: int):
+        """Both copies side by side, re-checked now: sizes, dates, fingerprints, why this copy."""
+        return guard(svc.duplicate_details, proposal_id)
+
     @app.post("/api/proposals/{proposal_id}/open")
-    def open_file(proposal_id: int, reveal: bool = False):
-        """Open the file with its Windows default app, or show it in Explorer (reveal=true)."""
-        path = guard(svc.current_path, proposal_id)
+    def open_file(proposal_id: int, reveal: bool = False, duplicate: bool = False):
+        """Open the file with its Windows default app, or show it in Explorer (reveal=true).
+        duplicate=true: the identical file this one duplicates (only that recorded path)."""
+        if duplicate:
+            p = guard(svc.get_proposal, proposal_id)
+            if not p.get("duplicate_path"):
+                raise HTTPException(404, "This file has no recorded duplicate")
+            path = Path(p["duplicate_path"])
+        else:
+            path = guard(svc.current_path, proposal_id)
         if not path.exists():
             raise HTTPException(404, f"File not found: {path}")
         _open_in_windows(path, reveal)
@@ -340,9 +361,22 @@ def _drives() -> list[str]:
         return []
 
 
+# The Windows path arrives on stdin, so spaces, quotes or & in names can't break the command line
+# (passing it as an argument made explorer.exe fall back to "Documents" for paths with spaces).
+_PS_OPEN = r"""
+[Console]::InputEncoding = [Text.Encoding]::UTF8
+$p = [Console]::In.ReadLine()
+if ($env:CLASSIFILES_REVEAL -eq '1') { Start-Process explorer.exe -ArgumentList ('/select,"' + $p + '"') }
+else { Invoke-Item -LiteralPath $p }
+"""
+
+
 def _open_in_windows(path: Path, reveal: bool) -> None:
     win = subprocess.run(["wslpath", "-w", str(path)], capture_output=True, text=True, check=True).stdout.strip()
-    # explorer.exe opens a file with its default app; /select shows it highlighted in its folder.
-    # (No cmd.exe: it would interpret characters like & in file names.)
-    args = ["explorer.exe", f"/select,{win}"] if reveal else ["explorer.exe", win]
-    subprocess.Popen(args, cwd="/mnt/c", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    wslenv = ":".join(x for x in (os.environ.get("WSLENV", ""), "CLASSIFILES_REVEAL") if x)
+    env = {**os.environ, "CLASSIFILES_REVEAL": "1" if reveal else "0", "WSLENV": wslenv}
+    proc = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _PS_OPEN],
+                            stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                            cwd="/mnt/c", env=env)
+    proc.stdin.write((win + "\n").encode("utf-8"))
+    proc.stdin.close()

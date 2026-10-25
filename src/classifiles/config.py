@@ -76,6 +76,11 @@ class Settings:
     ocr_pdf_pages: int = 2              # scanned PDFs without text: read this many first pages by OCR (0 = off)
     ocr_images: bool = True             # read text in images by OCR
     use_download_source: bool = True    # Windows download note -> website domain (local, domain only)
+    # Exact duplicates (identical content): inbox files that already exist in a category folder or
+    # several times in the inbox are proposed for Delete. Sorted folders need the file list, which
+    # is built with "Update index".
+    detect_duplicates: bool = True
+    duplicates_in_sorted: bool = True
     # Second opinion from a local language model for unsure files (examples backend only). It is a
     # hint for reviewing ("both agree" / "suggests X"); it never changes confidence or status.
     second_opinion: bool = False
