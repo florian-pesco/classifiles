@@ -4,6 +4,7 @@ import {
   type Category, type PlannedMove, type Proposal, type Scan, type Settings, type Status,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { CompareDuplicate } from '../components/CompareDuplicate'
 import { PathEditor } from '../components/PathEditor'
 import { PathInput } from '../components/FolderPicker'
 import { Modal } from '../components/Modal'
@@ -11,6 +12,7 @@ import { Preview } from '../components/Preview'
 import { STATUS_LABEL } from '../labels'
 
 const APPLIED_LABEL = { move: 'Moved', copy: 'Copied', delete: 'In trash' } as const
+type Filter = Status | 'all' | 'duplicates'
 const FILTERS: (Status | 'all')[] = ['all', 'needs_review', 'suggested', 'accepted', 'rejected', 'moved']
 
 type SortKey = 'confidence' | 'confidence_asc' | 'name' | 'category' | 'kind' | 'size' | 'modified'
@@ -53,7 +55,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [scans, setScans] = useState<Scan[]>([])
   const [scan, setScan] = useState<Scan | null>(null)
   const [proposals, setProposals] = useState<Proposal[]>([])
-  const [filter, setFilter] = useState<Status | 'all'>('all')
+  const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortKey>('confidence')
   const [inbox, setInbox] = useState(settings.inboxes[0] ?? '')
@@ -61,6 +63,9 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [onlyNew, setOnlyNew] = useState(false)
   const [plan, setPlan] = useState<PlannedMove[] | null>(null)
   const [preview, setPreview] = useState<Proposal | null>(null)
+  // Compare session: the duplicates to go through, fixed when the window opens (so decisions made
+  // in it don't reshuffle the list), plus the one to start with.
+  const [compare, setCompare] = useState<{ ids: number[]; start: number } | null>(null)
   const [busy, setBusy] = useState(false)
 
   const loadScans = useCallback(async () => {
@@ -99,16 +104,33 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     return () => clearInterval(t)
   }, [scan, fail, loadScans])
 
+  const duplicates = useMemo(() => proposals.filter(p => p.duplicate_of && p.status !== 'moved')
+    .sort((a, b) => a.name.localeCompare(b.name)), [proposals])
+  // still to decide: not yet marked for deletion (accepted) or kept (rejected)
+  const undecidedDuplicates = useMemo(
+    () => duplicates.filter(p => p.status === 'suggested' || p.status === 'needs_review'), [duplicates])
+  const openCompare = (startId?: number) => {
+    const ids = undecidedDuplicates.map(p => p.id)
+    if (startId !== undefined && !ids.includes(startId)) ids.unshift(startId) // opened on a decided row
+    if (ids.length) setCompare({ ids, start: startId ?? ids[0] })
+  }
+  const compareList = useMemo(
+    () => (compare ? compare.ids.map(id => proposals.find(p => p.id === id)).filter((p): p is Proposal => !!p) : []),
+    [compare, proposals])
+
   const counts = useMemo(() => {
-    const c: Record<string, number> = { all: proposals.length }
-    for (const p of proposals) c[p.status] = (c[p.status] ?? 0) + 1
+    const c: Record<string, number> = { all: proposals.length, duplicates: 0 }
+    for (const p of proposals) {
+      c[p.status] = (c[p.status] ?? 0) + 1
+      if (p.duplicate_of) c.duplicates += 1
+    }
     return c
   }, [proposals])
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
     const rows = proposals.filter(p =>
-      (filter === 'all' || p.status === filter) &&
+      (filter === 'all' || (filter === 'duplicates' ? !!p.duplicate_of : p.status === filter)) &&
       (!needle || p.name.toLowerCase().includes(needle) || (p.final_target ?? '').toLowerCase().includes(needle)))
     return sortRows(rows, sort)
   }, [proposals, filter, search, sort])
@@ -245,6 +267,19 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             {f === 'all' ? 'All' : STATUS_LABEL[f]} <span className="count">{counts[f] ?? 0}</span>
           </button>
         ))}
+        {counts.duplicates > 0 && (
+          <>
+            <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
+              Duplicates <span className="count">{counts.duplicates}</span>
+            </button>
+            {undecidedDuplicates.length > 0 && (
+              <button className="chip dup-chip" onClick={() => openCompare()}
+                      title="Go through the undecided duplicates one by one with a side-by-side comparison">
+                Review duplicates ({undecidedDuplicates.length}) →
+              </button>
+            )}
+          </>
+        )}
         <span className="grow" />
         {scan && !running && scan.total < scan.inbox_total && (
           <span className="muted small">{scan.total} of {scan.inbox_total} inbox files ·</span>
@@ -260,6 +295,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       <ul className="list">
         {visible.map(p => (
           <ProposalRow key={p.id} p={p} categories={categories} threshold={threshold}
+                       onCompare={() => openCompare(p.id)}
                        onReview={review} onPreview={() => setPreview(p)} />
         ))}
       </ul>
@@ -280,6 +316,10 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       </footer>
 
       {preview && <Preview p={preview} onClose={() => setPreview(null)} onError={m => fail(new Error(m))} />}
+      {compare && compareList.length > 0 && (
+        <CompareDuplicate list={compareList} startId={compare.start} onClose={() => setCompare(null)}
+                          onDecide={(p, d) => (d === 'delete' ? review(p, 'accept', p.final_target ?? undefined) : review(p, 'reject'))} />
+      )}
 
       {plan && (
         <Modal title="Apply these changes?" onClose={() => setPlan(null)} wide>
@@ -309,12 +349,13 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   )
 }
 
-function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
+function ProposalRow({ p, categories, threshold, onReview, onPreview, onCompare }: {
   p: Proposal
   categories: Category[]
   threshold: number
   onReview: (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) => void
   onPreview: () => void
+  onCompare: () => void
 }) {
   const cat = categories.find(c => c.name === p.final_target)
   const [open, setOpen] = useState(false)
@@ -327,7 +368,7 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
   const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
 
   return (
-    <li className={`row status-${p.status}`}>
+    <li className={`row status-${p.status}${p.duplicate_of ? ' is-dup' : ''}`}>
       <div className="file">
         <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open}>{p.name}</button>
         <div className="muted small">
@@ -374,6 +415,15 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
 
       <span className={`badge ${p.status}`}>{statusLabel}</span>
 
+      {p.duplicate_of && (
+        <div className="dup-line small">
+          <span className="dup-label">
+            {p.duplicate_kind === 'sorted' ? 'Identical file already in your folders:' : 'Identical file also in the inbox:'}
+          </span>
+          <span className="mono dup-path" title={p.duplicate_of}>{p.duplicate_of}</span>
+          <button className="compare-btn" onClick={onCompare}>Compare</button>
+        </div>
+      )}
       {cat && cat.source !== 'delete' && (
         <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
                     newFolder={p.new_folder} disabled={done}

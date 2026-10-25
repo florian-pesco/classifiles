@@ -29,6 +29,8 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [ocrImages, setOcrImages] = useState(settings.ocr_images)
   const [useSource, setUseSource] = useState(settings.use_download_source)
   const [secondOpinion, setSecondOpinion] = useState(settings.second_opinion)
+  const [dupes, setDupes] = useState(settings.detect_duplicates)
+  const [dupesSorted, setDupesSorted] = useState(settings.duplicates_in_sorted)
   const [llmModel, setLlmModel] = useState(settings.llm_model)
   const [llmMax, setLlmMax] = useState(settings.llm_max_files)
 
@@ -49,6 +51,8 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         ocr_images: ocrImages,
         use_download_source: useSource,
         second_opinion: secondOpinion,
+        detect_duplicates: dupes,
+        duplicates_in_sorted: dupesSorted,
         llm_model: llmModel,
         llm_max_files: llmMax,
       })
@@ -108,6 +112,22 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="check field-check">
           <input type="checkbox" checked={useSource} onChange={e => setUseSource(e.target.checked)} />
           Use where a file was downloaded from (Windows records the website; only the domain, e.g. lms.example.edu, is kept)
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Duplicates</h3>
+        <p className="muted small">
+          Files with exactly the same content are proposed for Delete (undoable trash); the copy to keep is sorted
+          normally. Only files of the same size are ever compared, so this is cheap.
+        </p>
+        <label className="check field-check">
+          <input type="checkbox" checked={dupes} onChange={e => setDupes(e.target.checked)} />
+          Find duplicates within the inbox (e.g. a file downloaded twice)
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={dupesSorted} disabled={!dupes} onChange={e => setDupesSorted(e.target.checked)} />
+          Also find inbox files that already exist in your folders (uses the file list built by "Update index")
         </label>
       </section>
 
