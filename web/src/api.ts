@@ -25,6 +25,9 @@ export interface Proposal {
   suggested_subpath: string | null
   subpath: string | null
   new_folder: string | null
+  knn_confidence: number | null
+  llm_choice: string | null
+  llm_confidence: number | null
 }
 
 export interface Scan {
@@ -33,6 +36,10 @@ export interface Scan {
   backend: string
   threshold: number
   status: 'running' | 'done' | 'failed'
+  phase: 'classify' | 'second_opinion' | null
+  llm_total: number
+  llm_done: number
+  llm_error: string | null
   max_files: number | null
   only_new: number
   inbox_total: number
@@ -113,6 +120,9 @@ export interface Settings {
   ocr_pdf_pages: number
   ocr_images: boolean
   use_download_source: boolean
+  second_opinion: boolean
+  llm_model: string
+  llm_max_files: number
 }
 
 export interface IndexStatus {
@@ -204,6 +214,7 @@ export const api = {
   browse: (path?: string) => call<FsListing>('GET', `/api/fs?${q({ path })}`),
 
   scans: () => call<Scan[]>('GET', '/api/scans'),
+  cancelSecondOpinion: () => call<{ ok: boolean }>('POST', '/api/scans/second-opinion/cancel'),
   scan: (id: number) => call<Scan>('GET', `/api/scans/${id}`),
   startScan: (inbox: string | undefined, maxFiles: number | undefined, onlyNew: boolean) =>
     call<Scan>('POST', '/api/scans', { inbox, max_files: maxFiles ?? 0, only_new: onlyNew }),

@@ -239,3 +239,10 @@ h3 { font-size: 15px; margin: 0; }
 .path-dialog .row-form { margin: 0; align-items: center; }
 .field-check { margin-top: 10px; white-space: normal; align-items: flex-start; }
 .field-check input { margin-top: 3px; }
+
+/* second opinion */
+.second-opinion { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
+.badge.so-agree { background: var(--ok-bg); color: var(--ok); }
+.badge.so-differ { background: var(--info-bg); color: var(--accent); }
+.so-progress { margin-top: 10px; align-items: center; }
+.so-progress .progress { margin-top: 0; }

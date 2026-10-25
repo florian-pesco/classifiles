@@ -16,6 +16,10 @@ CREATE TABLE IF NOT EXISTS scans (
     backend TEXT NOT NULL,
     threshold REAL NOT NULL,
     status TEXT NOT NULL DEFAULT 'running',   -- running | done | failed
+    phase TEXT,                               -- classify | second_opinion
+    llm_total INTEGER NOT NULL DEFAULT 0,
+    llm_done INTEGER NOT NULL DEFAULT 0,
+    llm_error TEXT,
     max_files INTEGER,                        -- NULL = no limit
     only_new INTEGER NOT NULL DEFAULT 0,      -- 1 = skip files classified in earlier scans
     inbox_total INTEGER NOT NULL DEFAULT 0,   -- files in the inbox when the scan started
@@ -45,6 +49,9 @@ CREATE TABLE IF NOT EXISTS proposals (
     suggested_subpath TEXT,             -- folder inside the category suggested by the model ('' = top level)
     subpath TEXT,                       -- folder inside the category that apply will use ('' = top level)
     new_folder TEXT,                    -- suggested NEW subpath (not created unless chosen as subpath)
+    knn_confidence REAL,                -- example model's confidence before a second opinion
+    llm_choice TEXT,                    -- category the language model chose (second opinion)
+    llm_confidence REAL,                -- its probability for that choice
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
@@ -89,6 +96,13 @@ MIGRATIONS = [
     ("proposals", "new_folder", "TEXT"),
     ("moves", "category_key", "TEXT"),
     ("moves", "created_dir", "TEXT"),
+    ("proposals", "knn_confidence", "REAL"),
+    ("proposals", "llm_choice", "TEXT"),
+    ("proposals", "llm_confidence", "REAL"),
+    ("scans", "phase", "TEXT"),
+    ("scans", "llm_total", "INTEGER NOT NULL DEFAULT 0"),
+    ("scans", "llm_done", "INTEGER NOT NULL DEFAULT 0"),
+    ("scans", "llm_error", "TEXT"),
 ]
 
 JSON_FIELDS = ("evidence", "alternatives", "neighbours")

@@ -217,6 +217,31 @@ for each category folder:                                 query text = file name
 - **Learning:** applied files are learned with their path inside the category
   (`moves.category_key` + relative path), so later suggestions include folders created on Apply.
 
+### 4d. Second opinion (`llm.py`, `llm_worker.py`)
+
+- **Gating:** example-model proposals below the threshold, with ≥150 characters of text or a file name
+  with ≥2 meaningful words, and ≥2 candidate categories; at most `llm_max_files` per scan.
+- **Question:** the file (name, type, download source, ≤1200 characters) and the top-3 candidates, each
+  with its description and its 3 most similar sorted files. The answer is read from the
+  probabilities of the letters A/B/C after the prompt (one forward pass, no generation).
+- **Letter bias:** small models prefer certain letters, and the example model's favourite would
+  always be "A". So the question is asked once per rotation of the option order (`llm_rotations`,
+  default 3) and the answers are averaged.
+- **Worker process:** `python -m classifiles.llm_worker` with its own GPU memory limit
+  (`llm_gpu_fraction`), nice 10, and a JSON-lines protocol on stdin/stdout (no port). The embedder
+  is unloaded first; the worker is shut down after the step, so all GPU memory is freed. It can be
+  cancelled; a failure is recorded on the scan (`llm_error`) and the scan still completes.
+- **Hint, not confidence:** the result is stored as `llm_choice` / `llm_confidence` and shown in
+  Review. Measured on real data (unsure files only, small samples):
+  - when both agree, the first choice was right 11 of 13 times on real decisions, but only 6 of 16
+    times for files of unsorted topics (folder split);
+  - blending the model into the confidence ("confirm only", 4B) lifted 10 of 11 unsure real
+    decisions correctly above the threshold, but on new topics only 6 of 11.
+
+  Because of that risk, it doesn't change confidence; `evaluate_second_opinion` /
+  `classifiles eval --second-opinion` keep the comparison.
+- **For later:** the worker has a `task` field, so naming folders and files can be added as new tasks.
+
 ### 4b. Laya
 
 **Laya** is an open "System One" decision model (Apache-2.0). It is an open alternative to TypeSafe's Jev.

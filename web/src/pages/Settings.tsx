@@ -28,6 +28,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [ocrPages, setOcrPages] = useState(settings.ocr_pdf_pages)
   const [ocrImages, setOcrImages] = useState(settings.ocr_images)
   const [useSource, setUseSource] = useState(settings.use_download_source)
+  const [secondOpinion, setSecondOpinion] = useState(settings.second_opinion)
+  const [llmModel, setLlmModel] = useState(settings.llm_model)
+  const [llmMax, setLlmMax] = useState(settings.llm_max_files)
 
   const save = async () => {
     const [backend, laya_model] = model.split(':')
@@ -45,6 +48,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         ocr_pdf_pages: ocrPages,
         ocr_images: ocrImages,
         use_download_source: useSource,
+        second_opinion: secondOpinion,
+        llm_model: llmModel,
+        llm_max_files: llmMax,
       })
       onSaved(s)
       notify('Settings saved.')
@@ -102,6 +108,30 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="check field-check">
           <input type="checkbox" checked={useSource} onChange={e => setUseSource(e.target.checked)} />
           Use where a file was downloaded from (Windows records the website; only the domain, e.g. lms.example.edu, is kept)
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Second opinion</h3>
+        <p className="muted small">
+          For files the model is unsure about, a local language model takes a second look and the Review list shows
+          "✓ both agree" or its own suggestion. It is a hint for reviewing: it never changes the confidence or
+          accepts anything. The model runs on this PC only during that step of a scan and is closed afterwards.
+        </p>
+        <label className="check field-check">
+          <input type="checkbox" checked={secondOpinion} onChange={e => setSecondOpinion(e.target.checked)} />
+          Ask for a second opinion on unsure files (needs "Learn from my folders")
+        </label>
+        <label className="field">
+          <span>Language model</span>
+          <select value={llmModel} onChange={e => setLlmModel(e.target.value)}>
+            <option value="Qwen/Qwen3.5-2B">Qwen3.5 2B: light (≈4 GB GPU memory, ~0.6 s per file; one-time download 4.5 GB)</option>
+            <option value="Qwen/Qwen3-4B-Instruct-2507">Qwen3 4B: stronger (≈8 GB GPU memory, ~0.9 s per file; download 8 GB)</option>
+          </select>
+        </label>
+        <label className="field">
+          <span>At most this many unsure files per scan</span>
+          <input type="number" min={1} max={1000} value={llmMax} onChange={e => setLlmMax(Number(e.target.value))} />
         </label>
       </section>
 

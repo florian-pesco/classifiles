@@ -141,6 +141,7 @@ never scanned.
 | Scanned PDFs: OCR pages | PDFs without a text layer (scans) get their first N pages (default 2, 0 = off) read by local text recognition; ~1 s per page. Inbox files only. |
 | Read text in images | OCR for images and screenshots in the inbox (on by default). |
 | Use where a file was downloaded from | Windows records the download website on each downloaded file. Classifiles reads it locally (through PowerShell) and keeps only the domain, e.g. `lms.example.edu`. Shown as "from …" in Review. |
+| Second opinion | For files below the threshold (with readable text or a meaningful name), a local language model takes a second look. Review then shows **✓ both agree** or **2nd opinion: X** with *use it*. It's a hint only: it never changes the confidence or accepts anything. Model: Qwen3.5 2B (≈4 GB GPU memory, ~0.6 s per file) or Qwen3 4B (≈8 GB). It runs in its own process during that step of a scan and is closed afterwards; **Skip** stops it. The first use downloads the model once. |
 | Sample file names | For categories **without** a description, this many file names from the folder are shown to the model instead. |
 
 Category, rule and setting changes all apply to the **next scan**. Existing proposals keep their

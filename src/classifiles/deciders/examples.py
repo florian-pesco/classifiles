@@ -28,7 +28,8 @@ class ExampleDecider:
         probs = {c.name: probs_by_key.get(k, 0.0) for k, c in by_key.items()}
         extras = {"vector": vec,
                   "neighbours": [{"category": by_key[n.category_key].name, "dir": os.path.dirname(n.relpath),
-                                  "weight": round(n.weight, 4)} for n in neighbours if n.relpath]}
+                                  "file": os.path.basename(n.relpath), "weight": round(n.weight, 4)}
+                                 for n in neighbours if n.relpath]}
         similar = []
         for n in neighbours[:3]:
             c = by_key[n.category_key]
