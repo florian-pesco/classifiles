@@ -76,6 +76,13 @@ class Settings:
     ocr_pdf_pages: int = 2              # scanned PDFs without text: read this many first pages by OCR (0 = off)
     ocr_images: bool = True             # read text in images by OCR
     use_download_source: bool = True    # Windows download note -> website domain (local, domain only)
+    # Second opinion from a local language model for unsure files (examples backend only).
+    second_opinion: bool = False
+    llm_model: str = "Qwen/Qwen3.5-2B"
+    llm_max_files: int = 100            # per scan
+    llm_gpu_fraction: float = 0.7       # GPU share of the separate model process
+    llm_weight: float = 0.5             # 0 = examples only, 1 = language model only
+    llm_rotations: int = 3              # ask with rotated option orders and average (removes letter bias)
     db_path: str = str(DATA_DIR / "classifiles.db")
 
     def __post_init__(self):
