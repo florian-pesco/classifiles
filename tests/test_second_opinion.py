@@ -139,9 +139,9 @@ def test_combine_and_helpers():
     assert not llm.has_evidence(ev)
     ev.name = "Projektarbeit Smart Home.pdf"
     assert llm.has_evidence(ev)
-    nb = [{"category": "Uni", "dir": "V/BWL 1", "file": "a.pdf", "weight": 1},
+    nb = [{"category": "Studies", "dir": "V/Econ 1", "file": "a.pdf", "weight": 1},
           {"category": "Work", "dir": "", "file": "b.docx", "weight": .5}]
-    assert llm.examples_for(nb, "Uni") == ["Uni/V/BWL 1/a.pdf"] and llm.examples_for(nb, "Work") == ["Work/b.docx"]
+    assert llm.examples_for(nb, "Studies") == ["Studies/V/Econ 1/a.pdf"] and llm.examples_for(nb, "Work") == ["Work/b.docx"]
 
 
 def test_client_protocol_with_a_fake_worker():

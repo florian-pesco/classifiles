@@ -109,7 +109,7 @@ def candidates(alternatives: list[dict], k: int = 3, min_prob: float = 0.005) ->
 # --- the question -----------------------------------------------------------------------
 
 def examples_for(neighbours: list[dict], category: str, n: int = 3) -> list[str]:
-    """Paths of the most similar already-sorted files in a category ('Uni/Vorlesungen/BWL 1/x.pdf')."""
+    """Paths of the most similar already-sorted files in a category ('Studies/Lectures/Econ 1/x.pdf')."""
     out = []
     for nb in neighbours:
         if nb["category"] == category and nb.get("file"):

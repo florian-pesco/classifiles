@@ -57,12 +57,12 @@ def test_explicit_missing_config_is_an_error(tmp_path):
 
 
 def test_inbox_inside_root_is_not_a_category(service, tree):
-    inbox = tree["root"] / "00_Inbox"
+    inbox = tree["root"] / "Inbox"
     inbox.mkdir()
     (inbox / "a.txt").write_text("invoice")
     _, rows = service.scan(inbox)
-    assert "00_Inbox" not in {c.name for c in service.categories()}
-    assert rows[0]["target"] != "00_Inbox"
+    assert "Inbox" not in {c.name for c in service.categories()}
+    assert rows[0]["target"] != "Inbox"
 
 
 def test_samples_only_without_description_and_not_recursive(tree):

@@ -406,9 +406,9 @@ class ClassifilesService:
         if sibling:
             cat_path = self.category(target).path
             if cat_path is not None and (cat_path / sibling).is_dir():
-                subpath = sibling  # e.g. "BWL 2" exists already: that's the folder
+                subpath = sibling  # e.g. "Econ 2" exists already: that's the folder
             elif cat_path is not None:
-                new_folder = sibling  # e.g. "BWL 2" doesn't exist yet: propose it ...
+                new_folder = sibling  # e.g. "Econ 2" doesn't exist yet: propose it ...
                 subpath = sibling.rpartition("/")[0]  # ... and default to the shared parent folder
             container = False
         return subpath, new_folder, container

@@ -94,23 +94,23 @@ def test_rules_validated_against_categories(service):
 
 def test_same_folder_name_in_two_roots(tmp_path):
     for r in ("A", "B"):
-        (tmp_path / r / "Uni").mkdir(parents=True)
+        (tmp_path / r / "Studies").mkdir(parents=True)
     cats = build_categories([{"path": str(tmp_path / "A")}, {"path": str(tmp_path / "B")}], [], 0,
                             delete={"enabled": True})
-    assert sorted(c.name for c in cats) == ["Delete", "Uni (A)", "Uni (B)"]
+    assert sorted(c.name for c in cats) == ["Delete", "Studies (A)", "Studies (B)"]
 
 
 def test_legacy_config_is_upgraded():
-    s = Settings.from_dict({"target_root": "/data", "folder_descriptions": {"Uni": "lectures"},
+    s = Settings.from_dict({"target_root": "/data", "folder_descriptions": {"Studies": "lectures"},
                             "exclude_folders": ["Backups"], "inboxes": ["/data/in"]})
     assert s.roots == [{"path": "/data"}]
-    assert {"path": "/data/Uni", "description": "lectures"} in s.categories
+    assert {"path": "/data/Studies", "description": "lectures"} in s.categories
     assert {"path": "/data/Backups", "enabled": False} in s.categories
 
 
 def test_prune_keeps_only_changes():
     roots = [{"path": "/data"}]
-    entries = [{"path": "/data/Uni", "name": "Uni", "description": "", "enabled": True, "action": "move"},
+    entries = [{"path": "/data/Studies", "name": "Studies", "description": "", "enabled": True, "action": "move"},
                {"path": "/data/Work", "description": " jobs "},
                {"path": "/elsewhere/Tax", "name": "Tax"}]
     assert _prune(roots, entries) == [{"path": "/data/Work", "description": "jobs"}, {"path": "/elsewhere/Tax"}]

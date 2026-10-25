@@ -22,7 +22,7 @@ def test_copy_markers():
     for name in ("report (1).pdf", "report - Kopie.pdf", "report - Copy (2).pdf", "Copy of report.pdf",
                  "Kopie von report.pdf", "report_copy.pdf"):
         assert copy_marked(name), name
-    for name in ("report.pdf", "BWL 1 Folien.pdf", "copyright.pdf"):
+    for name in ("report.pdf", "Econ 1 Slides.pdf", "copyright.pdf"):
         assert not copy_marked(name), name
 
 

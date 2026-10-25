@@ -70,7 +70,7 @@ def original_first(paths: list[Path]) -> list[Path]:
 
 @dataclass
 class Duplicate:
-    of: str                     # what it duplicates, for display: "Uni/Vorlesungen/x.pdf" or "x.pdf" (inbox)
+    of: str                     # what it duplicates, for display: "Studies/Lectures/x.pdf" or "x.pdf" (inbox)
     kind: str                   # "sorted" | "inbox"
     path: str                   # absolute path of that file
     content_hash: str = ""

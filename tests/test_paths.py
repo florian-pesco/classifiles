@@ -15,28 +15,28 @@ def n(cat, d, w):
 
 
 def test_deepest_folder_most_neighbours_agree_on():
-    nb = [n("Uni", "Vorlesungen/BWL 1", 1), n("Uni", "Vorlesungen/BWL 1", .8), n("Uni", "Vorlesungen/Ana", .3),
+    nb = [n("Studies", "Lectures/Econ 1", 1), n("Studies", "Lectures/Econ 1", .8), n("Studies", "Lectures/Ana", .3),
           n("Work", "x", 1)]
-    assert suggest_subpath(nb, "Uni") == ("Vorlesungen/BWL 1", False)
+    assert suggest_subpath(nb, "Studies") == ("Lectures/Econ 1", False)
     assert suggest_subpath(nb, "Work") == ("x", False)
     assert suggest_subpath(nb, "Other") == ("", False)
 
 
 def test_spread_children_mark_a_container():
-    nb = [n("Uni", "Vorlesungen/A", 1), n("Uni", "Vorlesungen/B", .9), n("Uni", "Vorlesungen/C", .8)]
-    assert suggest_subpath(nb, "Uni") == ("Vorlesungen", True)
+    nb = [n("Studies", "Lectures/A", 1), n("Studies", "Lectures/B", .9), n("Studies", "Lectures/C", .8)]
+    assert suggest_subpath(nb, "Studies") == ("Lectures", True)
 
 
 def test_top_level_when_no_folder_has_a_majority():
-    nb = [n("Uni", "A", 1), n("Uni", "B", 1), n("Uni", "", 1)]
-    sub, container = suggest_subpath(nb, "Uni")
+    nb = [n("Studies", "A", 1), n("Studies", "B", 1), n("Studies", "", 1)]
+    sub, container = suggest_subpath(nb, "Studies")
     assert sub == ""
 
 
 def test_folder_names_from_file_names():
     assert name_tokens("ha05-solution1-1.pdf") == ["ha", "solution"]
     assert name_tokens("IMG_20250510_221937713.jpg") == []
-    assert suggest_folder_name(["BWL2_Folien_Kapitel3.pdf", "BWL2_Uebung_04.pdf", "bwl2-klausur.pdf"]) == "BWL"
+    assert suggest_folder_name(["Econ2_Slides_Kapitel3.pdf", "Econ2_Exercise_04.pdf", "econ2-exam.pdf"]) == "Econ"
     assert suggest_folder_name(["Projektarbeit Smart Home.pdf"]) == "Projektarbeit Smart Home"
     assert suggest_folder_name(["2024-01-01.pdf"]) == ""
 
@@ -126,12 +126,12 @@ def test_new_folder_suggestion_groups_similar_inbox_files(ex_service, sorted_tre
     ids = [r["id"] for r in rows[:3]]
     v = np.ones(4) / 2
     far = np.array([1.0, 0, 0, 0])
-    cands = [{"id": ids[0], "category": "Finance", "parent": "", "name": "BWL2_Folien.pdf", "vector": v},
-             {"id": ids[1], "category": "Finance", "parent": "", "name": "BWL2_Uebung.pdf", "vector": v},
+    cands = [{"id": ids[0], "category": "Finance", "parent": "", "name": "Econ2_Slides.pdf", "vector": v},
+             {"id": ids[1], "category": "Finance", "parent": "", "name": "Econ2_Exercise.pdf", "vector": v},
              {"id": ids[2], "category": "Finance", "parent": "", "name": "2025.pdf", "vector": far}]
     ex_service._suggest_new_folders(cands)
     got = {r["id"]: r["new_folder"] for r in ex_service.proposals(scan_id)}
-    assert got[ids[0]] == got[ids[1]] == "BWL" and got[ids[2]] is None
+    assert got[ids[0]] == got[ids[1]] == "Econ" and got[ids[2]] is None
     # a suggested name that already exists becomes a normal subfolder suggestion
     cands = [{"id": ids[2], "category": "Finance", "parent": "", "name": "2025 statements.pdf", "vector": far}]
     (sorted_tree["root"] / "Finance" / "statements").mkdir()
@@ -140,13 +140,13 @@ def test_new_folder_suggestion_groups_similar_inbox_files(ex_service, sorted_tre
 
 
 @pytest.mark.parametrize("sub,name,expected", [
-    ("Vorlesungen/BWL 1", "BWL2_Folien_Kapitel1.txt", "Vorlesungen/BWL 2"),
+    ("Lectures/Econ 1", "Econ2_Slides_Kapitel1.txt", "Lectures/Econ 2"),
     ("2025", "Rechnung_2026_01.pdf", "2026"),
     ("Kunden/Order35", "order 36 notes.txt", "Kunden/Order36"),
-    ("Vorlesungen/BWL 1", "BWL1_Folien.txt", None),        # same number
-    ("Vorlesungen/Analysis", "Analysis2.pdf", None),       # folder has no number
+    ("Lectures/Econ 1", "Econ1_Slides.txt", None),        # same number
+    ("Lectures/Analysis", "Analysis2.pdf", None),       # folder has no number
     ("2025", "Rechnung_05.pdf", None),                     # no year in the name
-    ("", "BWL2.pdf", None),
+    ("", "Econ2.pdf", None),
 ])
 def test_numbered_sibling(sub, name, expected):
     from classifiles.paths import numbered_sibling

@@ -73,14 +73,14 @@ An inbox folder is never offered as a category, even if it sits inside a root.
    - **✓** accept as proposed · **✕** keep in inbox · **↺** reset.
    - **Accept all suggested** accepts everything at or above the threshold.
 3. **Folder inside the category** (line under each file, "Learn from my folders" only). Classifiles
-   suggests the subfolder where the most similar files are, e.g. `Uni › Vorlesungen › BWL 1`.
+   suggests the subfolder where the most similar files are, e.g. `Studies › Lectures › Econ 1`.
    - It is **used by default** when you accept (✓ or *Accept all suggested*).
    - **Click a part** of the path to shorten it to that level; **category only** puts the file
      directly into the category folder. *… category only* in the footer does that for all suggested files.
    - **edit…** lets you type or pick any folder inside the category. Folders that don't exist yet
      are created when you apply.
-   - **+ new folder "…"**: when a file looks like a new course or year (e.g. `BWL2_…` next to a
-     `BWL 1` folder, or `…_2026_…` next to `2025`), a new sibling folder is proposed. Until you
+   - **+ new folder "…"**: when a file looks like a new course or year (e.g. `Econ2_…` next to a
+     `Econ 1` folder, or `…_2026_…` next to `2025`), a new sibling folder is proposed. Until you
      click it, the file goes to the existing parent folder. New folders are only ever created on
      Apply, and Undo removes them again if they're empty.
 4. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
@@ -140,7 +140,7 @@ never scanned.
 | Learn from my folders: limits | Example files per category (default 3000), documents whose text is read (default 300), max GPU memory share (default 25%). Lower values make the index faster and lighter. |
 | Scanned PDFs: OCR pages | PDFs without a text layer (scans) get their first N pages (default 2, 0 = off) read by local text recognition; ~1 s per page. Inbox files only. |
 | Read text in images | OCR for images and screenshots in the inbox (on by default). |
-| Use where a file was downloaded from | Windows records the download website on each downloaded file. Classifiles reads it locally (through PowerShell) and keeps only the domain, e.g. `moodle.tum.de`. Shown as "from …" in Review. |
+| Use where a file was downloaded from | Windows records the download website on each downloaded file. Classifiles reads it locally (through PowerShell) and keeps only the domain, e.g. `lms.example.edu`. Shown as "from …" in Review. |
 | Pictures | Inbox pictures are compared with pictures you already sorted, by what they look like (local image model, ≈0.3 GB GPU memory; up to 300 sorted pictures per category, built with **Update index**). Combined with the name/text result; **How much the picture counts** sets the mix (default 50%). Review shows "looks like: …" in the details. |
 | Duplicates | Files with byte-for-byte identical content are found **within the inbox** (e.g. downloaded twice) and **against your folders** (already sorted). They're proposed for Delete (undoable trash) with "identical to …"; the copy to keep is sorted normally (the one without "(1)"/"Kopie", else the oldest). **Compare** (on the row) or **Review duplicates →** (next to the filter chips) shows both copies side by side, re-checks them, lists size, fingerprint, dates and names, and explains why this copy goes; keys ← → browse, **D** delete this copy, **K** keep both. Apply checks once more and never deletes a duplicate whose kept copy is gone or changed. The folder check uses a file list built together with **Update index** (Categories). Duplicate deletions are not learned as "junk". |
 | Second opinion | For files below the threshold (with readable text or a meaningful name), a local language model takes a second look. Review then shows **✓ both agree** or **2nd opinion: X** with *use it*. It's a hint only: it never changes the confidence or accepts anything. Model: Qwen3.5 2B (≈4 GB GPU memory, ~0.6 s per file) or Qwen3 4B (≈8 GB). It runs in its own process during that step of a scan and is closed afterwards; **Skip** stops it. The first use downloads the model once. |
@@ -186,7 +186,7 @@ db_path: /home/<you>/.local/share/classifiles/classifiles.db
 ```
 
 Categories are identified by **path**. A category's name is its folder name unless you set `name`. If
-two roots both have a folder with the same name, the UI shows them as `Uni (RootA)` / `Uni (RootB)`.
+two roots both have a folder with the same name, the UI shows them as `Studies (RootA)` / `Studies (RootB)`.
 Rules refer to these names.
 
 Files in the older format (`target_root`, `folder_descriptions`, `exclude_folders`) are read and

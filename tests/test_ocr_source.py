@@ -51,13 +51,13 @@ def test_image_ocr_can_be_switched_off(tmp_path):
 def test_windows_paths_and_domains():
     assert windows_path("/mnt/d/Daten/Inbox/a b.pdf") == "D:\\Daten\\Inbox\\a b.pdf"
     assert windows_path("/home/me/file.pdf") is None
-    assert domain("https://www.moodle.tum.de/course/view.php?id=1") == "moodle.tum.de"
+    assert domain("https://www.lms.example.edu/course/view.php?id=1") == "lms.example.edu"
     assert domain("about:internet") is None and domain("file:///C:/x") is None and domain("") is None
 
 
 def test_referrer_preferred_and_full_url_dropped():
-    z = "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://www.moodle.tum.de/x?id=1\r\nHostUrl=https://cdn.example.org/f.pdf\r\n"
-    assert parse_zone_identifier(z) == "moodle.tum.de"
+    z = "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://www.lms.example.edu/x?id=1\r\nHostUrl=https://cdn.example.org/f.pdf\r\n"
+    assert parse_zone_identifier(z) == "lms.example.edu"
     assert parse_zone_identifier("[ZoneTransfer]\nZoneId=3\nHostUrl=https://files.example.org/a?token=s3cret") == "files.example.org"
     assert parse_zone_identifier("[ZoneTransfer]\nZoneId=3") is None
 
@@ -87,14 +87,14 @@ def test_no_lookup_for_files_outside_windows_drives():
 
 def test_scan_adds_source_to_evidence_and_query(service, tree, monkeypatch):
     target = tree["inbox"] / "invoice_march.txt"
-    monkeypatch.setattr("classifiles.service.download_sources", lambda files: {target: "moodle.tum.de"})
+    monkeypatch.setattr("classifiles.service.download_sources", lambda files: {target: "lms.example.edu"})
     _, rows = service.scan(tree["inbox"])
     r = next(r for r in rows if r["name"] == "invoice_march.txt")
-    assert r["evidence"]["meta"]["source"] == "moodle.tum.de"
+    assert r["evidence"]["meta"]["source"] == "lms.example.edu"
     from classifiles.extract.base import Evidence
 
     ev = Evidence(**{k: v for k, v in r["evidence"].items() if k in Evidence.__dataclass_fields__})
-    assert "source: moodle.tum.de" in query_text(ev)
+    assert "source: lms.example.edu" in query_text(ev)
 
 
 def test_source_lookup_can_be_switched_off(service, tree, monkeypatch):

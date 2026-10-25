@@ -3,7 +3,7 @@ import { api } from '../api'
 
 /**
  * Folder inside the chosen category, shown as clickable breadcrumbs:
- *   Uni › Vorlesungen › BWL 1      click a part to shorten the path to it; "Category only" removes it
+ *   Studies › Lectures › Econ 1      click a part to shorten the path to it; "Category only" removes it
  * plus a suggested new folder (created only when chosen) and an editor with the existing subfolders.
  */
 export function PathEditor({ category, subpath, suggested, newFolder, disabled, onChange }: {

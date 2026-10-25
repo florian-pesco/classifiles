@@ -1,10 +1,10 @@
 """Folder paths inside a category: suggest an existing subfolder, propose a new one, validate input.
 
 A *subpath* is a path relative to the category folder ("" = the category folder itself), always
-with "/" separators, e.g. "Vorlesungen/BWL 1".
+with "/" separators, e.g. "Lectures/Econ 1".
 
 Suggestion (example backend): the nearest already-sorted files vote with their folders. Every
-prefix of a neighbour's folder gets its weight ("Vorlesungen", "Vorlesungen/BWL 1", ...). The
+prefix of a neighbour's folder gets its weight ("Lectures", "Lectures/Econ 1", ...). The
 deepest prefix holding at least `share` of the category's total weight wins. That is a folder most
 similar files agree on.
 
@@ -66,16 +66,16 @@ def _is_container(weight: dict[str, float], parent: str) -> bool:
     return max(children.values()) / sum(children.values()) < CONTAINER_MAX_CHILD_SHARE
 
 
-# --- numbered siblings ("BWL 1" -> "BWL 2", "2025" -> "2026") ---------------------------------
+# --- numbered siblings ("Econ 1" -> "Econ 2", "2025" -> "2026") ---------------------------------
 
 _NUMBERED = re.compile(r"^(?P<stem>.*?)(?P<sep>[\s_-]*)(?P<num>\d+)$")
 _YEAR = re.compile(r"(?<!\d)(19\d\d|20\d\d)(?!\d)")
 
 
 def numbered_sibling(subpath: str, filename: str) -> str | None:
-    """If the suggested folder ends in a number ("BWL 1", "2025", "Order35") and the file name has
-    the same word with a different number ("BWL2_Folien.pdf", "Rechnung_2026_01.pdf"), return the
-    sibling folder's subpath ("Vorlesungen/BWL 2", "2026"). Otherwise None.
+    """If the suggested folder ends in a number ("Econ 1", "2025", "Order35") and the file name has
+    the same word with a different number ("Econ2_Slides.pdf", "Rechnung_2026_01.pdf"), return the
+    sibling folder's subpath ("Lectures/Econ 2", "2026"). Otherwise None.
 
     Similar files can't tell a new course or year from the existing one (they look alike), but the
     number in the name can."""
@@ -109,7 +109,7 @@ def name_tokens(filename: str) -> list[str]:
     stem = Path(filename).stem
     out = []
     for t in _TOKEN.findall(stem):
-        word = re.sub(r"\d+", "", t)  # 'ha05' -> 'ha', 'BWL2' -> 'BWL'
+        word = re.sub(r"\d+", "", t)  # 'ha05' -> 'ha', 'Econ2' -> 'Econ'
         if len(word) < 2 or word.lower() in _NOISE or re.fullmatch(r"[0-9a-f]{8,}", t.lower()):
             continue
         out.append(word)
@@ -147,7 +147,7 @@ def clean_folder_name(name: str) -> str:
 
 
 def normalize_subpath(subpath: str | None) -> str:
-    """'/Vorlesungen\\\\BWL 1/' -> 'Vorlesungen/BWL 1'. Raises ValueError for unsafe paths."""
+    """'/Lectures\\\\Econ 1/' -> 'Lectures/Econ 1'. Raises ValueError for unsafe paths."""
     if not subpath:
         return ""
     parts = [p.strip() for p in subpath.replace("\\", "/").split("/") if p.strip() not in ("", ".")]

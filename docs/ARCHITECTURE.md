@@ -109,7 +109,7 @@ And what it sees as options (`Category.option_text()`, from `taxonomy.py`):
 
 ```
 Finance → "invoices, bills, bank statements, taxes, budgets, receipts"
-Uni     → "university courses, lectures, seminar papers, exams, thesis"
+Studies     → "university courses, lectures, seminar papers, exams, thesis"
 Photos  → "files about Photos, e.g. IMG_0001.jpg, …"   ← no description configured
 ```
 
@@ -150,8 +150,8 @@ for each category folder:                                 query text = file name
   sample_folder(): ≤ examples_per_category files,         embed (with a retrieval instruction)
     round-robin over subfolders, skipping .git,           cosine similarity to all examples of the
     node_modules, build dirs, hidden files                  categories the model may suggest
-  text = "folder: Uni/Vorlesungen/BWL 1                   k = 20 nearest examples
-          file: BWL_Folien.pdf  type: pdf                 weight = exp((sim − best) / 0.05)
+  text = "folder: Studies/Lectures/Econ 1                   k = 20 nearest examples
+          file: Econ_Slides.pdf  type: pdf                 weight = exp((sim − best) / 0.05)
           content: <first 400 chars, docs only>"          P(category) = its share of the weight
   embed in batches of 32 (+ pause), store float16         reason = the 3 most similar files
   vectors in SQLite `examples` (incremental by mtime)
@@ -190,7 +190,7 @@ for each category folder:                                 query text = file name
   - **Download source** (`source.py`): Windows' `Zone.Identifier` stream on downloaded files is
     read through `powershell.exe` (one call per batch of 200; WSL can't read the stream itself).
     Only the domain of the referring page (else of the file's host) is kept, as
-    `evidence.meta.source`, and added to the query text ("source: moodle.tum.de"). Skipped silently
+    `evidence.meta.source`, and added to the query text ("source: lms.example.edu"). Skipped silently
     without PowerShell or for files that aren't on a Windows drive.
 - **Safety guard:** `check_ready()` refuses scans and index builds when a root isn't reachable
   (e.g. an unmounted drive). Otherwise every file would go to whatever category is left, such as
@@ -203,7 +203,7 @@ for each category folder:                                 query text = file name
   weight is `suggested_subpath` (`''` = category folder). Stored neighbours (`proposals.neighbours`)
   let a category change recompute it without re-embedding.
 - **New folders:**
-  1. *Numbered sibling:* the suggested folder ends in a number (`BWL 1`, `2025`, `Order35`) and the
+  1. *Numbered sibling:* the suggested folder ends in a number (`Econ 1`, `2025`, `Order35`) and the
      file name has the same word with another number. If that sibling exists, it becomes the
      suggestion. Otherwise it is offered as `new_folder`, and the default falls back to the shared
      parent.
@@ -233,7 +233,7 @@ for each category folder:                                 query text = file name
   - text only 75% / 65% (file / folder split) → combined **81% / 74%**;
   - at confidence ≥ 0.8, 82% of pictures were suggested, 91% of them right (text only: 59%, 87%).
 
-  On 27 real picture decisions it was neutral (19 → 18 right; it lost on 03_Arbeit, whose sorted
+  On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
   pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
 
 ### 4e. Duplicates (`duplicates.py`)

@@ -117,7 +117,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
         <label className="check field-check">
           <input type="checkbox" checked={useSource} onChange={e => setUseSource(e.target.checked)} />
-          Use where a file was downloaded from (Windows records the website; only the domain, e.g. moodle.tum.de, is kept)
+          Use where a file was downloaded from (Windows records the website; only the domain, e.g. lms.example.edu, is kept)
         </label>
       </section>
 

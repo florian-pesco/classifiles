@@ -4,8 +4,8 @@ Windows attaches an NTFS alternate data stream `Zone.Identifier` to downloaded f
 
     [ZoneTransfer]
     ZoneId=3
-    ReferrerUrl=https://www.moodle.tum.de/course/view.php?id=123
-    HostUrl=https://www.moodle.tum.de/pluginfile.php/456/file.pdf
+    ReferrerUrl=https://www.lms.example.edu/course/view.php?id=123
+    HostUrl=https://www.lms.example.edu/pluginfile.php/456/file.pdf
 
 WSL cannot read these streams through /mnt/<drive>, but powershell.exe can. Files are read in
 batches (one PowerShell call per batch). Only the domain is kept (the page you were on, or else
@@ -55,7 +55,7 @@ def windows_path(path: Path | str) -> str | None:
 
 
 def domain(url: str | None) -> str | None:
-    """'https://www.moodle.tum.de/x?id=1' -> 'moodle.tum.de'; None for local/blank/odd URLs."""
+    """'https://www.lms.example.edu/x?id=1' -> 'lms.example.edu'; None for local/blank/odd URLs."""
     if not url:
         return None
     try:

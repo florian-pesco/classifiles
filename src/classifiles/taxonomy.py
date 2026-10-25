@@ -124,7 +124,7 @@ def _category(path: Path, entry: dict, source: str, root: str | None, n_samples:
 
 
 def _make_names_unique(cats: list[Category]) -> None:
-    """Two roots may both have an 'Uni' folder: label them 'Uni (RootA)' and 'Uni (RootB)'.
+    """Two roots may both have an 'Studies' folder: label them 'Studies (RootA)' and 'Studies (RootB)'.
     The Delete category keeps its name; a folder called 'Delete' gets a suffix instead."""
     by_name: dict[str, list[Category]] = {}
     for c in cats:
