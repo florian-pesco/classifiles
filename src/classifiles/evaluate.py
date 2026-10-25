@@ -209,3 +209,117 @@ def summarize(rows: list[dict], by_via: bool = False) -> dict:
             via[r["via"]].append(ok)
         out["by_decided_via"] = {k: {"files": len(v), "accuracy": round(sum(v) / len(v), 3)} for k, v in sorted(via.items())}
     return out
+
+
+# --- second opinion --------------------------------------------------------------------
+
+WEIGHTS = (0.0, 0.3, 0.5, 0.7, 1.0)
+
+
+def _cases_heldout(service, per_category: int, seed: int, split: str) -> list[dict]:
+    holdout = pick_holdout(service, per_category, seed)
+    siblings = _sibling_ids(service, holdout) if split == "folder" else {}
+    held = {h["id"] for h in holdout}
+    sources = download_sources([h["path"] for h in holdout]) if service.settings.use_download_source else {}
+    return [{"ev": service.read_file(h["path"], sources.get(h["path"])), "true": h["category"],
+             "exclude": held | siblings.get(h["id"], set())} for h in holdout]
+
+
+def _cases_decisions(service) -> list[dict]:
+    from .service import _learned_key
+
+    rows = decided_proposals(service)
+    examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
+                                   (service.settings.embedding_model,))
+    by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
+               for e in examples if e["origin"] == "scan"}
+    by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
+    hide = set()
+    for r in rows:
+        if r["dst"]:
+            if os.path.normpath(r["dst"]) in by_path:
+                hide.add(by_path[os.path.normpath(r["dst"])])
+            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
+            if learned:
+                hide.add(learned)
+    fields = Evidence.__dataclass_fields__
+    return [{"ev": Evidence(**{k: v for k, v in r["evidence"].items() if k in fields}), "true": r["final_target"],
+             "exclude": hide} for r in rows]
+
+
+def evaluate_second_opinion(service, source: str = "folder", per_category: int = 40, seed: int = 0,
+                            weights: tuple[float, ...] = WEIGHTS,
+                            progress: Callable[[str, int, int], None] | None = None) -> dict:
+    """Example model first; the language model asked about the files a scan would send to it
+    (below the threshold, usable evidence); then the blend compared for several weights.
+    source: "folder" / "file" (held-out split) or "decisions". Aggregates only."""
+    from . import llm
+
+    service.check_ready()
+    threshold = service.settings.threshold
+    cases = _cases_decisions(service) if source == "decisions" else _cases_heldout(service, per_category, seed, source)
+    clf = Classifier(service.categories(), ExampleDecider(service.example_index()))
+    for i, c in enumerate(cases, 1):
+        if progress:
+            progress("example model", i, len(cases))
+        clf.decider_kwargs = {"exclude_ids": c["exclude"]}
+        r = clf.classify(c["ev"])
+        c.update(pred=r.target, conf=r.confidence, alts=r.alternatives, neighbours=r.neighbours, reason=r.reason)
+    gated = [c for c in cases if c["conf"] < threshold and len(llm.candidates(c["alts"])) >= 2
+             and llm.has_evidence(c["ev"])][:service.settings.llm_max_files]
+    if service._index is not None:
+        service._index.embedder.unload()
+    import time
+
+    started = time.time()
+    with llm.LLMClient(service.settings.llm_model, service.settings.llm_gpu_fraction, service.settings.cpu_threads) as client:
+        for i, c in enumerate(gated, 1):
+            if progress:
+                progress("second opinion", i, len(gated))
+            p = {"alternatives": c["alts"], "neighbours": c["neighbours"], "_ev": c["ev"]}
+            c["p_llm"] = service.ask_second_opinion(client, p)["p_llm"]
+        model_gb = client.info.get("gpu_gb")
+    seconds = (time.time() - started) / max(len(gated), 1)
+
+    g_cases = [c for c in cases if "p_llm" in c]
+    agree = [c for c in g_cases if max(c["p_llm"], key=c["p_llm"].get) == c["pred"]]
+    disagree = [c for c in g_cases if max(c["p_llm"], key=c["p_llm"].get) != c["pred"]]
+    agreement = {
+        "agree": len(agree),
+        "agree_right": sum(c["pred"] == c["true"] for c in agree),
+        "disagree": len(disagree),
+        "disagree_example_right": sum(c["pred"] == c["true"] for c in disagree),
+        "disagree_llm_right": sum(max(c["p_llm"], key=c["p_llm"].get) == c["true"] for c in disagree),
+    }
+    by_weight = {}
+    for w in weights:
+        for mode in ("blend", "confirm"):
+            rows = []
+            for c in cases:
+                pred, conf = c["pred"], c["conf"]
+                if "p_llm" in c:
+                    combined = llm.combine({a["folder"]: a["probability"] for a in c["alts"]}, c["p_llm"], w)
+                    if mode == "blend":
+                        pred = max(combined, key=combined.get)
+                        conf = combined[pred]
+                    elif max(c["p_llm"], key=c["p_llm"].get) == c["pred"]:  # confirm: only when they agree
+                        conf = max(conf, combined[c["pred"]])
+                rows.append({"true": c["true"], "pred": pred, "confidence": conf, "gated": "p_llm" in c})
+            by_weight[f"{mode} w={w}"] = _so_metrics(rows, threshold)
+    return {"source": source, "files": len(cases), "gated": len(gated), "threshold": threshold,
+            "model": service.settings.llm_model, "seconds_per_file": round(seconds, 2), "model_gpu_gb": model_gb,
+            "agreement": agreement, "by_weight": by_weight}
+
+
+def _so_metrics(rows: list[dict], threshold: float) -> dict:
+    """Overall accuracy, and for the files that got a second opinion: accuracy, how many now pass
+    the threshold and how many of those are right, calibration."""
+    g = [r for r in rows if r["gated"]]
+    passed = [r for r in g if r["confidence"] >= threshold]
+    return {
+        "overall_accuracy": round(sum(r["pred"] == r["true"] for r in rows) / len(rows), 3),
+        "gated_accuracy": round(sum(r["pred"] == r["true"] for r in g) / len(g), 3) if g else None,
+        "gated_passing": len(passed),
+        "passing_accuracy": round(sum(r["pred"] == r["true"] for r in passed) / len(passed), 3) if passed else None,
+        "calibration": summarize([{**r, "top3": []} for r in g])["calibration"] if g else [],
+    }

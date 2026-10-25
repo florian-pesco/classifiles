@@ -14,6 +14,7 @@ from .config import ACTIONS, Settings
 from .deciders import Decider, make_decider
 from .deciders.examples import ExampleDecider
 from .embedder import Embedder
+from . import llm
 from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
@@ -45,6 +46,7 @@ class ClassifilesService:
         self._decider = decider
         self._categories: list[Category] | None = None
         self._index: ExampleIndex | None = None
+        self._llm_cancel = threading.Event()
         self.store = store or Store(self.settings.db_path)
 
     # --- categories, rules & model -----------------------------------------------------------
@@ -278,6 +280,9 @@ class ClassifilesService:
             if candidates:
                 self._suggest_new_folders(candidates)
                 out = [self.get_proposal(p["id"]) for p in out]
+            if self.settings.second_opinion and self.settings.backend == "examples":
+                if self.run_second_opinion(scan_id, out, scan["threshold"]):
+                    out = [self.get_proposal(p["id"]) for p in out]
             self.store.update("scans", scan_id, {"status": "done"})
             return out
         except Exception as e:
@@ -304,17 +309,7 @@ class ClassifilesService:
         ev = self.read_file(path, source)
         c = clf.classify(ev)
         status = "suggested" if c.target and c.confidence >= threshold else "needs_review"
-        subpath, container = suggest_subpath(c.neighbours, c.target) if c.target else ("", False)
-        new_folder = None
-        sibling = numbered_sibling(subpath, ev.name)
-        if sibling:
-            cat_path = self.category(c.target).path
-            if cat_path is not None and (cat_path / sibling).is_dir():
-                subpath = sibling  # e.g. "BWL 2" exists already: that's the folder
-            elif cat_path is not None:
-                new_folder = sibling  # e.g. "BWL 2" doesn't exist yet: propose it ...
-                subpath = sibling.rpartition("/")[0]  # ... and default to the shared parent folder
-            container = False
+        subpath, new_folder, container = self._folder_for(c.target, c.neighbours, ev.name)
         pid = self.store.insert("proposals", {
             "scan_id": scan_id, "path": str(path), "name": ev.name, "kind": ev.kind, "size": ev.size,
             "evidence": ev.to_dict(), "target": c.target, "confidence": c.confidence, "source": c.source,
@@ -326,6 +321,102 @@ class ClassifilesService:
         if container and c.vector is not None:
             candidate = {"id": pid, "category": c.target, "parent": subpath, "name": ev.name, "vector": c.vector}
         return self.get_proposal(pid), candidate
+
+    def _folder_for(self, target: str | None, neighbours: list[dict], filename: str) -> tuple[str, str | None, bool]:
+        """(subpath, new_folder, is_container) for a file in category `target` (see paths.py)."""
+        if not target:
+            return "", None, False
+        subpath, container = suggest_subpath(neighbours, target)
+        new_folder = None
+        sibling = numbered_sibling(subpath, filename)
+        if sibling:
+            cat_path = self.category(target).path
+            if cat_path is not None and (cat_path / sibling).is_dir():
+                subpath = sibling  # e.g. "BWL 2" exists already: that's the folder
+            elif cat_path is not None:
+                new_folder = sibling  # e.g. "BWL 2" doesn't exist yet: propose it ...
+                subpath = sibling.rpartition("/")[0]  # ... and default to the shared parent folder
+            container = False
+        return subpath, new_folder, container
+
+    # --- second opinion (local language model) ----------------------------------------------
+
+    def second_opinion_candidates(self, proposals: list[dict], threshold: float) -> list[dict]:
+        """Proposals that get a second opinion: example-model proposals below the threshold with
+        usable evidence and at least two candidate categories; at most llm_max_files."""
+        from .extract.base import Evidence
+
+        fields = Evidence.__dataclass_fields__
+        out = []
+        for p in sorted(proposals, key=lambda p: p["confidence"]):
+            if p["source"] != "examples" or p["confidence"] >= threshold or p["status"] not in ("needs_review",):
+                continue
+            ev = Evidence(**{k: v for k, v in p["evidence"].items() if k in fields})
+            if len(llm.candidates(p["alternatives"])) < 2 or not llm.has_evidence(ev):
+                continue
+            out.append({**p, "_ev": ev})
+            if len(out) >= self.settings.llm_max_files:
+                break
+        return out
+
+    def ask_second_opinion(self, client, p: dict) -> dict:
+        """The language model's probabilities over the candidates of one proposal ({"p_llm": …})."""
+        cats = {c.name: c for c in self.categories()}
+        names = llm.candidates(p["alternatives"])
+        options = {n: {"name": n, "description": cats[n].description if n in cats else "",
+                       "examples": llm.examples_for(p["neighbours"] or [], n)} for n in names}
+        letters = llm.LETTERS[:len(names)]
+        # Ask once per rotation of the option order and average: small models prefer certain
+        # letters (often "A", which would always be the example model's favourite).
+        p_llm = {n: 0.0 for n in names}
+        rotations = max(1, min(self.settings.llm_rotations, len(names)))
+        for r in range(rotations):
+            order = names[r:] + names[:r]
+            probs = client.choose(llm.build_prompt(p["_ev"], [options[n] for n in order]), letters)
+            for n, letter in zip(order, letters):
+                p_llm[n] += probs[letter] / rotations
+        return {"p_llm": p_llm}
+
+    def run_second_opinion(self, scan_id: int, proposals: list[dict], threshold: float) -> int:
+        """Ask the local language model about unsure proposals and record its answer as a review
+        hint. Returns how many were checked. The model runs in its own process, which is stopped
+        afterwards."""
+        todo = self.second_opinion_candidates(proposals, threshold)
+        if not todo:
+            return 0
+        self._llm_cancel.clear()
+        self.store.update("scans", scan_id, {"phase": "second_opinion", "llm_total": len(todo), "llm_done": 0})
+        if self._index is not None:
+            self._index.embedder.unload()  # free GPU memory for the language model
+        done = 0
+        try:
+            with llm.LLMClient(self.settings.llm_model, self.settings.llm_gpu_fraction,
+                               self.settings.cpu_threads) as client:
+                for p in todo:
+                    if self._llm_cancel.is_set():
+                        break
+                    self._record_second_opinion(p, self.ask_second_opinion(client, p))
+                    done += 1
+                    self.store.update("scans", scan_id, {"llm_done": done})
+        except llm.LLMError as e:
+            self.store.update("scans", scan_id, {"llm_error": str(e)[:500]})
+        return done
+
+    def cancel_second_opinion(self) -> None:
+        self._llm_cancel.set()
+
+    def _record_second_opinion(self, p: dict, answer: dict) -> None:
+        """Store the language model's answer as a hint. Deliberately does NOT change the proposal's
+        category, confidence or status: in testing, agreement was a good sign on real inbox files
+        but raised confidence for wrong answers on files of unsorted topics."""
+        p_llm = answer["p_llm"]
+        choice = max(p_llm, key=p_llm.get)
+        note = "agrees" if choice == p["target"] else f"suggests {choice}"
+        self.store.update("proposals", p["id"], {
+            "llm_choice": choice, "llm_confidence": round(p_llm[choice], 4), "knn_confidence": p["confidence"],
+            "reason": (p["reason"] + "; " if p["reason"] else "") + f"second opinion {note} ({p_llm[choice]:.2f})",
+            "updated_at": now(),
+        })
 
     def _suggest_new_folders(self, candidates: list[dict], min_similarity: float = 0.8) -> None:
         """Propose a new subfolder for files whose similar files are spread over many subfolders.
