@@ -180,6 +180,23 @@ export interface Batch {
 
 export interface TrashItem { id: number; src: string; dst: string; moved_at: string; size: number | null }
 
+export interface DuplicateSide {
+  label: string
+  exists: boolean
+  size?: number
+  modified?: string
+  fingerprint?: string
+}
+
+export interface DuplicateDetails {
+  kind: 'sorted' | 'inbox'
+  this: DuplicateSide
+  other: DuplicateSide
+  identical_now: boolean
+  keep_reason: string
+  method: string
+}
+
 export interface FsListing { path: string | null; parent: string | null; dirs: string[]; shortcuts: string[] }
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
@@ -233,6 +250,7 @@ export const api = {
   subfolders: (category: string, path = '') =>
     call<{ path: string; dirs: string[]; exists?: boolean }>('GET', `/api/categories/subfolders?${q({ category, path })}`),
   fileUrl: (id: number) => `/api/proposals/${id}/file`,
+  duplicateDetails: (id: number) => call<DuplicateDetails>('GET', `/api/proposals/${id}/duplicate`),
   openFile: (id: number, reveal = false, duplicate = false) =>
     call<{ ok: boolean }>('POST', `/api/proposals/${id}/open?${q({ reveal, duplicate })}`),
 

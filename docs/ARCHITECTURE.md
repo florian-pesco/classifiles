@@ -230,6 +230,10 @@ for each category folder:                                 query text = file name
   "(1)"/"Kopie"/"Copy" marker, then oldest, then shortest name); the others are duplicates of it. A
   duplicate becomes a Delete proposal (`source = "duplicate"`, confidence 1.0) if Delete is enabled;
   otherwise it is only flagged. Its trash move isn't learned.
+- **Review safety:** `duplicate_details()` (`GET /api/proposals/{id}/duplicate`) re-hashes both copies on
+  request for the Compare view; `GET /api/proposals/{id}/file?duplicate=true` serves the kept copy for
+  preview. `_plan()` re-checks right before a duplicate is trashed and refuses ("Not deleted: …") if
+  the kept copy is gone or no longer identical.
 
 ### 4d. Second opinion (`llm.py`, `llm_worker.py`)
 

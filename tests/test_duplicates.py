@@ -145,3 +145,53 @@ def test_index_build_also_builds_the_catalog(service, tree, monkeypatch):
     service._index._thread.join(30)
     st = service.index_status()["catalog"]
     assert st["state"] == "done" and st["files"] >= 4 and st["enabled"]
+
+
+def _dup_scan(service, tree):
+    write(tree["root"] / "Finance" / "statement.pdf", b"bank statement")
+    write(tree["inbox"] / "statement.pdf", b"bank statement")
+    write(tree["inbox"] / "notes.txt", b"my notes", 100)
+    write(tree["inbox"] / "notes (1).txt", b"my notes", 200)
+    service.catalog().build(service.categories(refresh=True))
+    scan_id, rows = service.scan(tree["inbox"])
+    return scan_id, {r["name"]: r for r in rows}
+
+
+def test_duplicate_details_recheck_and_explain(service, tree):
+    _, by = _dup_scan(service, tree)
+    d = service.duplicate_details(by["notes (1).txt"]["id"])
+    assert d["identical_now"] and d["this"]["fingerprint"] == d["other"]["fingerprint"]
+    assert "looks like a copy" in d["keep_reason"] and "BLAKE2b" in d["method"]
+    s = service.duplicate_details(by["statement.pdf"]["id"])
+    assert s["kind"] == "sorted" and "already sorted" in s["keep_reason"]
+    write(tree["root"] / "Finance" / "statement.pdf", b"bank statemenX")  # same size, changed
+    assert not service.duplicate_details(by["statement.pdf"]["id"])["identical_now"]
+    with pytest.raises(ValueError):
+        service.duplicate_details(by["notes.txt"]["id"])
+
+
+def test_apply_refuses_when_the_kept_copy_changed_or_is_gone(service, tree):
+    scan_id, by = _dup_scan(service, tree)
+    service.review(by["statement.pdf"]["id"], "accept")
+    service.review(by["notes (1).txt"]["id"], "accept")
+    write(tree["root"] / "Finance" / "statement.pdf", b"changed since the scan")
+    (tree["inbox"] / "notes.txt").unlink()
+    res = service.apply(scan_id)
+    assert not res["moved"] and len(res["errors"]) == 2
+    assert all(e["error"].startswith("Not deleted:") for e in res["errors"])
+    assert (tree["inbox"] / "statement.pdf").exists() and (tree["inbox"] / "notes (1).txt").exists()
+
+
+def test_api_serves_the_identical_file_and_details(service, tree, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from classifiles_api.app import create_app
+
+    _, by = _dup_scan(service, tree)
+    client = TestClient(create_app(service, config_path=str(tmp_path / "cfg.yaml")))
+    pid = by["statement.pdf"]["id"]
+    r = client.get(f"/api/proposals/{pid}/file", params={"duplicate": "true"})
+    assert r.status_code == 200 and r.content == b"bank statement"
+    assert client.get(f"/api/proposals/{pid}/duplicate").json()["identical_now"] is True
+    assert client.get(f"/api/proposals/{by['notes.txt']['id']}/duplicate").status_code == 400
+    assert client.get(f"/api/proposals/{by['notes.txt']['id']}/file", params={"duplicate": "true"}).status_code == 404

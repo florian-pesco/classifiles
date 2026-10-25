@@ -4,6 +4,7 @@ import {
   type Category, type PlannedMove, type Proposal, type Scan, type Settings, type Status,
 } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { CompareDuplicate } from '../components/CompareDuplicate'
 import { PathEditor } from '../components/PathEditor'
 import { PathInput } from '../components/FolderPicker'
 import { Modal } from '../components/Modal'
@@ -62,6 +63,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [onlyNew, setOnlyNew] = useState(false)
   const [plan, setPlan] = useState<PlannedMove[] | null>(null)
   const [preview, setPreview] = useState<Proposal | null>(null)
+  const [compareId, setCompareId] = useState<number | null>(null)
   const [busy, setBusy] = useState(false)
 
   const loadScans = useCallback(async () => {
@@ -99,6 +101,9 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     }, 700)
     return () => clearInterval(t)
   }, [scan, fail, loadScans])
+
+  const duplicates = useMemo(() => proposals.filter(p => p.duplicate_of && p.status !== 'moved')
+    .sort((a, b) => a.name.localeCompare(b.name)), [proposals])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: proposals.length, duplicates: 0 }
@@ -250,9 +255,15 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
           </button>
         ))}
         {counts.duplicates > 0 && (
-          <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
-            Duplicates <span className="count">{counts.duplicates}</span>
-          </button>
+          <>
+            <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
+              Duplicates <span className="count">{counts.duplicates}</span>
+            </button>
+            <button className="chip dup-chip" onClick={() => setCompareId(duplicates[0]?.id ?? null)}
+                    title="Go through the duplicates one by one with a side-by-side comparison">
+              Review duplicates →
+            </button>
+          </>
         )}
         <span className="grow" />
         {scan && !running && scan.total < scan.inbox_total && (
@@ -269,6 +280,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       <ul className="list">
         {visible.map(p => (
           <ProposalRow key={p.id} p={p} categories={categories} threshold={threshold}
+                       onCompare={() => setCompareId(p.id)}
                        onReview={review} onPreview={() => setPreview(p)} />
         ))}
       </ul>
@@ -289,6 +301,10 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       </footer>
 
       {preview && <Preview p={preview} onClose={() => setPreview(null)} onError={m => fail(new Error(m))} />}
+      {compareId !== null && duplicates.length > 0 && (
+        <CompareDuplicate list={duplicates} startId={compareId} onClose={() => setCompareId(null)}
+                          onDecide={(p, d) => (d === 'delete' ? review(p, 'accept', p.final_target ?? undefined) : review(p, 'reject'))} />
+      )}
 
       {plan && (
         <Modal title="Apply these changes?" onClose={() => setPlan(null)} wide>
@@ -318,12 +334,13 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   )
 }
 
-function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
+function ProposalRow({ p, categories, threshold, onReview, onPreview, onCompare }: {
   p: Proposal
   categories: Category[]
   threshold: number
   onReview: (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) => void
   onPreview: () => void
+  onCompare: () => void
 }) {
   const cat = categories.find(c => c.name === p.final_target)
   const [open, setOpen] = useState(false)
@@ -336,7 +353,7 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
   const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
 
   return (
-    <li className={`row status-${p.status}`}>
+    <li className={`row status-${p.status}${p.duplicate_of ? ' is-dup' : ''}`}>
       <div className="file">
         <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open}>{p.name}</button>
         <div className="muted small">
@@ -345,15 +362,6 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
           {viaOcr && <> · <span title="Text read by OCR (scanned PDF)">OCR</span></>}
           {' · '}<button className="linkish" onClick={onPreview}>preview</button>
         </div>
-        {p.duplicate_of && (
-          <div className="duplicate small">
-            <span className="badge dup" title="Byte-for-byte identical content">
-              {p.duplicate_kind === 'sorted' ? 'already in your folders' : 'duplicate in inbox'}
-            </span>
-            <span className="mono">{p.duplicate_of}</span>
-            <button className="linkish" onClick={() => api.openFile(p.id, true, true).catch(() => undefined)}>show it</button>
-          </div>
-        )}
         {p.llm_choice && (
           <div className="second-opinion small">
             {llmAgrees
@@ -392,6 +400,15 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
 
       <span className={`badge ${p.status}`}>{statusLabel}</span>
 
+      {p.duplicate_of && (
+        <div className="dup-line small">
+          <span className="dup-label">
+            {p.duplicate_kind === 'sorted' ? 'Identical file already in your folders:' : 'Identical file also in the inbox:'}
+          </span>
+          <span className="mono dup-path" title={p.duplicate_of}>{p.duplicate_of}</span>
+          <button className="compare-btn" onClick={onCompare}>Compare</button>
+        </div>
+      )}
       {cat && cat.source !== 'delete' && (
         <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
                     newFolder={p.new_folder} disabled={done}

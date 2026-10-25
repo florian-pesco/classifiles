@@ -593,9 +593,67 @@ class ClassifilesService:
 
     def _plan(self, p: dict):
         try:
-            return plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or ""), None
+            m = plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or "")
         except (MoveError, ValueError) as e:
             return None, str(e)
+        if p["source"] == "duplicate" and m.action == "delete":
+            problem = self._duplicate_problem(p)
+            if problem:
+                return None, f"Not deleted: {problem}"
+        return m, None
+
+    def _duplicate_problem(self, p: dict) -> str | None:
+        """Safety check right before a duplicate goes to the trash: the identical copy must still
+        exist and still be identical. Returns a reason if not."""
+        from .duplicates import full_hash
+
+        other = Path(p["duplicate_path"]) if p.get("duplicate_path") else None
+        if other is None or not other.is_file():
+            return f"the identical copy is gone ({p.get('duplicate_of') or 'unknown'})"
+        try:
+            if other.stat().st_size != Path(p["path"]).stat().st_size or full_hash(other) != full_hash(Path(p["path"])):
+                return f"{p['duplicate_of']} has changed and is no longer identical"
+        except OSError as e:
+            return f"could not read the files ({e})"
+        return None
+
+    def duplicate_details(self, proposal_id: int) -> dict:
+        """Facts behind a duplicate proposal, with both files re-checked now."""
+        from datetime import datetime
+
+        from .duplicates import copy_marked, full_hash
+
+        p = self.get_proposal(proposal_id)
+        if not p.get("duplicate_path"):
+            raise ValueError("This file is not marked as a duplicate")
+
+        def side(path: Path, label: str) -> dict:
+            info = {"label": label, "exists": path.is_file()}
+            if info["exists"]:
+                st = path.stat()
+                info.update({"size": st.st_size,
+                             "modified": datetime.fromtimestamp(st.st_mtime).isoformat(timespec="seconds"),
+                             "fingerprint": full_hash(path)})
+            return info
+
+        this = side(self.current_path(proposal_id), p["name"])
+        other = side(Path(p["duplicate_path"]), p["duplicate_of"])
+        identical = this["exists"] and other["exists"] and this["size"] == other["size"] \
+            and this["fingerprint"] == other["fingerprint"]
+        if p["duplicate_kind"] == "sorted":
+            keep = "The other copy is already sorted in your folders, so the inbox copy is the one to remove."
+        else:
+            why = []
+            if copy_marked(p["name"]) and not copy_marked(Path(p["duplicate_path"]).name):
+                why.append("this name looks like a copy (e.g. \"(1)\", \"Kopie\")")
+            if this.get("modified") and other.get("modified") and this["modified"] > other["modified"]:
+                why.append("the other copy is older")
+            keep = ("The other copy is kept because " + " and ".join(why) + ".") if why else \
+                "The other copy is kept (shorter or earlier name)."
+        return {"kind": p["duplicate_kind"], "this": this, "other": other, "identical_now": identical,
+                "keep_reason": keep,
+                "method": "Same size in bytes and the same BLAKE2b fingerprint (128-bit) of the entire content. "
+                          "Names and dates don't matter."}
 
     def plan_apply(self, scan_id: int | None = None) -> list[dict]:
         """Dry run: what apply() would do for accepted proposals, including problems."""
