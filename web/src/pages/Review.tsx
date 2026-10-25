@@ -63,7 +63,9 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [onlyNew, setOnlyNew] = useState(false)
   const [plan, setPlan] = useState<PlannedMove[] | null>(null)
   const [preview, setPreview] = useState<Proposal | null>(null)
-  const [compareId, setCompareId] = useState<number | null>(null)
+  // Compare session: the duplicates to go through, fixed when the window opens (so decisions made
+  // in it don't reshuffle the list), plus the one to start with.
+  const [compare, setCompare] = useState<{ ids: number[]; start: number } | null>(null)
   const [busy, setBusy] = useState(false)
 
   const loadScans = useCallback(async () => {
@@ -104,6 +106,17 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
 
   const duplicates = useMemo(() => proposals.filter(p => p.duplicate_of && p.status !== 'moved')
     .sort((a, b) => a.name.localeCompare(b.name)), [proposals])
+  // still to decide: not yet marked for deletion (accepted) or kept (rejected)
+  const undecidedDuplicates = useMemo(
+    () => duplicates.filter(p => p.status === 'suggested' || p.status === 'needs_review'), [duplicates])
+  const openCompare = (startId?: number) => {
+    const ids = undecidedDuplicates.map(p => p.id)
+    if (startId !== undefined && !ids.includes(startId)) ids.unshift(startId) // opened on a decided row
+    if (ids.length) setCompare({ ids, start: startId ?? ids[0] })
+  }
+  const compareList = useMemo(
+    () => (compare ? compare.ids.map(id => proposals.find(p => p.id === id)).filter((p): p is Proposal => !!p) : []),
+    [compare, proposals])
 
   const counts = useMemo(() => {
     const c: Record<string, number> = { all: proposals.length, duplicates: 0 }
@@ -259,10 +272,12 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
               Duplicates <span className="count">{counts.duplicates}</span>
             </button>
-            <button className="chip dup-chip" onClick={() => setCompareId(duplicates[0]?.id ?? null)}
-                    title="Go through the duplicates one by one with a side-by-side comparison">
-              Review duplicates →
-            </button>
+            {undecidedDuplicates.length > 0 && (
+              <button className="chip dup-chip" onClick={() => openCompare()}
+                      title="Go through the undecided duplicates one by one with a side-by-side comparison">
+                Review duplicates ({undecidedDuplicates.length}) →
+              </button>
+            )}
           </>
         )}
         <span className="grow" />
@@ -280,7 +295,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       <ul className="list">
         {visible.map(p => (
           <ProposalRow key={p.id} p={p} categories={categories} threshold={threshold}
-                       onCompare={() => setCompareId(p.id)}
+                       onCompare={() => openCompare(p.id)}
                        onReview={review} onPreview={() => setPreview(p)} />
         ))}
       </ul>
@@ -301,8 +316,8 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       </footer>
 
       {preview && <Preview p={preview} onClose={() => setPreview(null)} onError={m => fail(new Error(m))} />}
-      {compareId !== null && duplicates.length > 0 && (
-        <CompareDuplicate list={duplicates} startId={compareId} onClose={() => setCompareId(null)}
+      {compare && compareList.length > 0 && (
+        <CompareDuplicate list={compareList} startId={compare.start} onClose={() => setCompare(null)}
                           onDecide={(p, d) => (d === 'delete' ? review(p, 'accept', p.final_target ?? undefined) : review(p, 'reject'))} />
       )}
 
