@@ -25,6 +25,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [contentPerCategory, setContentPerCategory] = useState(settings.content_per_category)
   const [gpuShare, setGpuShare] = useState(Math.round(settings.gpu_memory_fraction * 100))
   const [samples, setSamples] = useState(settings.samples_per_folder)
+  const [ocrPages, setOcrPages] = useState(settings.ocr_pdf_pages)
+  const [ocrImages, setOcrImages] = useState(settings.ocr_images)
+  const [useSource, setUseSource] = useState(settings.use_download_source)
 
   const save = async () => {
     const [backend, laya_model] = model.split(':')
@@ -39,6 +42,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         examples_per_category: perCategory,
         content_per_category: contentPerCategory,
         gpu_memory_fraction: gpuShare / 100,
+        ocr_pdf_pages: ocrPages,
+        ocr_images: ocrImages,
+        use_download_source: useSource,
       })
       onSaved(s)
       notify('Settings saved.')
@@ -79,6 +85,23 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="field">
           <span>Sample file names shown to the model for folders without a description</span>
           <input type="number" min={0} max={10} value={samples} onChange={e => setSamples(Number(e.target.value))} />
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Reading inbox files</h3>
+        <p className="muted small">How much classifiles reads from new files. Everything runs on this PC; only inbox files are read this way, never while indexing.</p>
+        <label className="field">
+          <span>Scanned PDFs (no text inside): read the first <b>{ocrPages}</b> page{ocrPages === 1 ? '' : 's'} with text recognition (OCR, ~1 s per page; 0 = off)</span>
+          <input type="number" min={0} max={5} value={ocrPages} onChange={e => setOcrPages(Number(e.target.value))} />
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={ocrImages} onChange={e => setOcrImages(e.target.checked)} />
+          Read text in images and screenshots (OCR)
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={useSource} onChange={e => setUseSource(e.target.checked)} />
+          Use where a file was downloaded from (Windows records the website; only the domain, e.g. moodle.tum.de, is kept)
         </label>
       </section>
 

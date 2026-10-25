@@ -19,6 +19,7 @@ from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
 from .paths import normalize_subpath, numbered_sibling, suggest_folder_name, suggest_subpath
 from .rules import load_rules
+from .source import download_sources
 from .store import Store, now
 from .taxonomy import Category, build_categories
 
@@ -259,10 +260,12 @@ class ClassifilesService:
             clf = self.classifier(scan["inbox"])
             files = self.select_files(scan["inbox"], scan["max_files"], bool(scan["only_new"]))
             self.store.update("scans", scan_id, {"total": len(files)})
+            sources = download_sources(files) if self.settings.use_download_source else {}
             out, candidates = [], []
             for i, path in enumerate(files, 1):
                 try:
-                    proposal, candidate = self._classify_file(scan_id, clf, path, scan["threshold"])
+                    proposal, candidate = self._classify_file(scan_id, clf, path, scan["threshold"],
+                                                              sources.get(path))
                 except FileNotFoundError:  # moved or deleted since the scan started
                     proposal = None
                 else:
@@ -286,10 +289,19 @@ class ClassifilesService:
         scan_id = self.start_scan(inbox, max_files, only_new)
         return scan_id, self.run_scan(scan_id, on_progress)
 
-    def _classify_file(self, scan_id: int, clf: Classifier, path: Path, threshold: float) -> tuple[dict, dict | None]:
+    def read_file(self, path: Path, source: str | None = None):
+        """Evidence for an inbox file, with the inbox reading options (OCR, download source)."""
+        s = self.settings
+        ev = extract(path, s.max_text_chars, ocr_pdf_pages=s.ocr_pdf_pages, ocr_images=s.ocr_images)
+        if source:
+            ev.meta["source"] = source
+        return ev
+
+    def _classify_file(self, scan_id: int, clf: Classifier, path: Path, threshold: float,
+                       source: str | None = None) -> tuple[dict, dict | None]:
         """Classify and store one file. Returns the proposal and, if a new subfolder might fit,
         a candidate for _suggest_new_folders()."""
-        ev = extract(path, self.settings.max_text_chars)
+        ev = self.read_file(path, source)
         c = clf.classify(ev)
         status = "suggested" if c.target and c.confidence >= threshold else "needs_review"
         subpath, container = suggest_subpath(c.neighbours, c.target) if c.target else ("", False)

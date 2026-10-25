@@ -20,8 +20,8 @@ from .classifier import Classifier
 from .deciders import make_decider
 from .deciders.examples import ExampleDecider
 from .examples import category_key
-from .extract import extract
 from .extract.base import Evidence
+from .source import download_sources
 
 CONFIDENCE_BUCKETS = [(0.0, 0.5), (0.5, 0.7), (0.7, 0.9), (0.9, 1.01)]
 THRESHOLDS = [0.5, 0.6, 0.7, 0.8, 0.9]
@@ -67,11 +67,13 @@ def evaluate(service, backends: list[str], per_category: int = 30, seed: int = 0
     cats = service.categories()
     all_held = {h["id"] for h in holdout}
     siblings = _sibling_ids(service, holdout) if "folder" in splits else {}
+    # read held-out files exactly like inbox files (OCR, download source)
+    sources = download_sources([h["path"] for h in holdout]) if service.settings.use_download_source else {}
     evidence = []
     for i, h in enumerate(holdout, 1):
         if progress:
             progress("reading files", i, len(holdout))
-        evidence.append(extract(h["path"], service.settings.max_text_chars))
+        evidence.append(service.read_file(h["path"], sources.get(h["path"])))
 
     results = {}
     for backend in backends:
@@ -149,9 +151,19 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
         clf = Classifier(service.categories(), ExampleDecider(service.example_index()))
         clf.decider_kwargs = {"exclude_ids": hide}
         fields = Evidence.__dataclass_fields__
+        # decisions scanned before the download source existed: look it up at the file's new place
+        # (the Windows note moves with the file within a drive)
+        sources = {}
+        if service.settings.use_download_source:
+            from pathlib import Path
+
+            moved = [Path(r["dst"]) for r in rows if r["dst"] and r["action"] != "delete"]
+            sources = {str(p): d for p, d in download_sources(moved).items()}
         current = []
         for r in rows:
             ev = Evidence(**{k: v for k, v in r["evidence"].items() if k in fields})
+            if r["dst"] and str(r["dst"]) in sources and not ev.meta.get("source"):
+                ev.meta = {**ev.meta, "source": sources[str(r["dst"])]}
             c = clf.classify(ev)
             current.append({"true": r["final_target"], "pred": c.target, "confidence": c.confidence,
                             "top3": [a["folder"] for a in c.alternatives[:3]], "via": r["decided_via"] or "unknown"})

@@ -41,6 +41,9 @@ class SettingsPatch(BaseModel):
     content_per_category: int | None = None
     gpu_memory_fraction: float | None = None
     cpu_threads: int | None = None
+    ocr_pdf_pages: int | None = None
+    ocr_images: bool | None = None
+    use_download_source: bool | None = None
 
 
 class CategoriesUpdate(BaseModel):
@@ -90,6 +93,8 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         values = patch.model_dump(exclude_none=True)
         if "max_files" in values:
             values["max_files"] = values["max_files"] or None
+        if "ocr_pdf_pages" in values and not 0 <= values["ocr_pdf_pages"] <= 5:
+            raise HTTPException(400, "ocr_pdf_pages must be between 0 and 5")
         if "gpu_memory_fraction" in values and not 0.05 <= values["gpu_memory_fraction"] <= 0.9:
             raise HTTPException(400, "gpu_memory_fraction must be between 0.05 and 0.9")
         if {"backend", "laya_model"} & set(values):

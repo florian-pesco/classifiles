@@ -183,6 +183,15 @@ for each category folder:                                 query text = file name
     `decided_via` (confirm / override / bulk / reject), and the current model can be re-run on the
     stored evidence with the applied files hidden from the index. The History page shows this as
     the Quality card.
+- **Reading inbox files** (`service.read_file`) differs from indexing on purpose:
+  - **OCR for scanned PDFs** (`extract/pdf.py`): when the first pages have no text layer, the first
+    `ocr_pdf_pages` pages (default 2) are rendered with pypdfium2 (≤150 dpi, longest side ≤2000 px)
+    and read by RapidOCR (`extract/ocr.py`, shared with image OCR). Indexing never runs OCR.
+  - **Download source** (`source.py`): Windows' `Zone.Identifier` stream on downloaded files is
+    read through `powershell.exe` (one call per batch of 200; WSL can't read the stream itself).
+    Only the domain of the referring page (else of the file's host) is kept, as
+    `evidence.meta.source`, and added to the query text ("source: moodle.tum.de"). Skipped silently
+    without PowerShell or for files that aren't on a Windows drive.
 - **Safety guard:** `check_ready()` refuses scans and index builds when a root isn't reachable
   (e.g. an unmounted drive). Otherwise every file would go to whatever category is left, such as
   Delete, with high confidence.

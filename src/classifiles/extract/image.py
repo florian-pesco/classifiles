@@ -1,18 +1,14 @@
 from __future__ import annotations
 
-import logging
 import re
-from functools import lru_cache
 from pathlib import Path
-
-log = logging.getLogger(__name__)
 
 _SCREENSHOT_NAME = re.compile(r"screen ?shot|bildschirmfoto|screenshot|snip|capture", re.I)
 _SCREEN_SIZES = {(1920, 1080), (2560, 1440), (3840, 2160), (1366, 768), (1440, 900), (2560, 1600),
                  (2880, 1800), (1280, 720), (1536, 864), (3440, 1440)}
 
 
-def extract(path: Path, max_chars: int) -> tuple[str, dict]:
+def extract(path: Path, max_chars: int, ocr: bool = True) -> tuple[str, dict]:
     from PIL import Image
 
     meta: dict = {}
@@ -31,26 +27,8 @@ def extract(path: Path, max_chars: int) -> tuple[str, dict]:
         meta["looks_like"] = "screenshot"
     elif "camera" in meta:
         meta["looks_like"] = "photo"
-    text = _ocr(path, max_chars)
-    return text, meta
+    if not ocr:
+        return "", meta
+    from .ocr import ocr_image
 
-
-def _ocr(path: Path, max_chars: int) -> str:
-    engine = _ocr_engine()
-    if engine is None:
-        return ""
-    try:
-        result, _ = engine(str(path))
-    except Exception as e:
-        log.debug("OCR failed for %s: %s", path, e)
-        return ""
-    return " ".join(r[1] for r in (result or []))[:max_chars]
-
-
-@lru_cache(maxsize=1)
-def _ocr_engine():
-    try:
-        from rapidocr_onnxruntime import RapidOCR
-    except ImportError:
-        return None
-    return RapidOCR()
+    return ocr_image(str(path), max_chars), meta

@@ -110,6 +110,9 @@ export interface Settings {
   content_per_category: number
   gpu_memory_fraction: number
   cpu_threads: number
+  ocr_pdf_pages: number
+  ocr_images: boolean
+  use_download_source: boolean
 }
 
 export interface IndexStatus {

@@ -61,6 +61,8 @@ def query_text(ev: Evidence) -> str:
     looks = ev.meta.get("looks_like")
     if looks:
         t += f" ({looks})"
+    if ev.meta.get("source"):
+        t += f"\nsource: {ev.meta['source']}"
     return t + (f"\ncontent: {ev.text[:SNIPPET_CHARS]}" if ev.text else "")
 
 
