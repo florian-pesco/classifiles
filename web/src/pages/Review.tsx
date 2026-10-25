@@ -308,6 +308,8 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
   const done = p.status === 'moved'
   const confClass = p.confidence >= threshold ? 'high' : p.confidence >= threshold / 2 ? 'mid' : 'low'
   const looks = p.evidence.meta?.looks_like as string | undefined
+  const source = p.evidence.meta?.source as string | undefined
+  const viaOcr = String(p.evidence.meta?.note ?? '').startsWith('text read by OCR')
   const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
 
   return (
@@ -316,6 +318,8 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview }: {
         <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open}>{p.name}</button>
         <div className="muted small">
           {p.kind}{looks ? ` · ${looks}` : ''} · {humanSize(p.size)} · {p.evidence.modified?.slice(0, 10)}
+          {source && <> · from <span title="Where it was downloaded from">{source}</span></>}
+          {viaOcr && <> · <span title="Text read by OCR (scanned PDF)">OCR</span></>}
           {' · '}<button className="linkish" onClick={onPreview}>preview</button>
         </div>
         {open && (

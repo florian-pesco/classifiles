@@ -72,6 +72,10 @@ class Settings:
     # Sample filenames shown to the model for folders WITHOUT a description.
     samples_per_folder: int = 3
     max_text_chars: int = 1500
+    # Reading inbox files (never applied while indexing):
+    ocr_pdf_pages: int = 2              # scanned PDFs without text: read this many first pages by OCR (0 = off)
+    ocr_images: bool = True             # read text in images by OCR
+    use_download_source: bool = True    # Windows download note -> website domain (local, domain only)
     db_path: str = str(DATA_DIR / "classifiles.db")
 
     def __post_init__(self):

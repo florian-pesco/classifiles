@@ -138,6 +138,9 @@ never scanned.
 | Default max files | Pre-fills the number field on Review. |
 | Model | **Learn from my folders** (recommended: compares with your already-sorted files), Laya English or multilingual (decide from the descriptions only), or keyword matching (testing only). |
 | Learn from my folders: limits | Example files per category (default 3000), documents whose text is read (default 300), max GPU memory share (default 25%). Lower values make the index faster and lighter. |
+| Scanned PDFs: OCR pages | PDFs without a text layer (scans) get their first N pages (default 2, 0 = off) read by local text recognition; ~1 s per page. Inbox files only. |
+| Read text in images | OCR for images and screenshots in the inbox (on by default). |
+| Use where a file was downloaded from | Windows records the download website on each downloaded file. Classifiles reads it locally (through PowerShell) and keeps only the domain, e.g. `lms.example.edu`. Shown as "from …" in Review. |
 | Sample file names | For categories **without** a description, this many file names from the folder are shown to the model instead. |
 
 Category, rule and setting changes all apply to the **next scan**. Existing proposals keep their
