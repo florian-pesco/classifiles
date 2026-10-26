@@ -74,7 +74,7 @@ _YEAR = re.compile(r"(?<!\d)(19\d\d|20\d\d)(?!\d)")
 
 def numbered_sibling(subpath: str, filename: str) -> str | None:
     """If the suggested folder ends in a number ("Econ 1", "2025", "Order35") and the file name has
-    the same word with a different number ("Econ2_slides.pdf", "Rechnung_2026_01.pdf"), return the
+    the same word with a different number ("Econ2_Slides.pdf", "Rechnung_2026_01.pdf"), return the
     sibling folder's subpath ("Lectures/Econ 2", "2026"). Otherwise None.
 
     Similar files can't tell a new course or year from the existing one (they look alike), but the

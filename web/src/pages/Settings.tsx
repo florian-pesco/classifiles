@@ -29,6 +29,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [ocrImages, setOcrImages] = useState(settings.ocr_images)
   const [useSource, setUseSource] = useState(settings.use_download_source)
   const [secondOpinion, setSecondOpinion] = useState(settings.second_opinion)
+  const [images, setImages] = useState(settings.image_similarity)
+  const [imageWeight, setImageWeight] = useState(settings.image_weight)
+  const [imagesPer, setImagesPer] = useState(settings.images_per_category)
   const [dupes, setDupes] = useState(settings.detect_duplicates)
   const [dupesSorted, setDupesSorted] = useState(settings.duplicates_in_sorted)
   const [llmModel, setLlmModel] = useState(settings.llm_model)
@@ -51,6 +54,9 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         ocr_images: ocrImages,
         use_download_source: useSource,
         second_opinion: secondOpinion,
+        image_similarity: images,
+        image_weight: imageWeight,
+        images_per_category: imagesPer,
         detect_duplicates: dupes,
         duplicates_in_sorted: dupesSorted,
         llm_model: llmModel,
@@ -112,6 +118,29 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="check field-check">
           <input type="checkbox" checked={useSource} onChange={e => setUseSource(e.target.checked)} />
           Use where a file was downloaded from (Windows records the website; only the domain, e.g. lms.example.edu, is kept)
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Pictures</h3>
+        <p className="muted small">
+          Inbox pictures are compared with pictures you already sorted, by what they look like (local image model,
+          ≈0.3 GB GPU memory). Built with "Update index" on the Categories page; the first time downloads the model
+          once (1.5 GB). Combined with the name/text result.
+        </p>
+        <label className="check field-check">
+          <input type="checkbox" checked={images} onChange={e => setImages(e.target.checked)} />
+          Compare pictures by what they look like
+        </label>
+        <label className="field">
+          <span>How much the picture counts: <b>{Math.round(imageWeight * 100)}%</b> (rest: name and text)</span>
+          <input type="range" min={0} max={1} step={0.1} value={imageWeight} disabled={!images}
+                 onChange={e => setImageWeight(Number(e.target.value))} />
+        </label>
+        <label className="field">
+          <span>Sorted pictures per category to compare with (sampled across subfolders)</span>
+          <input type="number" min={50} max={3000} step={50} value={imagesPer} disabled={!images}
+                 onChange={e => setImagesPer(Number(e.target.value))} />
         </label>
       </section>
 

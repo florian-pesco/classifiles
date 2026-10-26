@@ -323,3 +323,74 @@ def _so_metrics(rows: list[dict], threshold: float) -> dict:
         "passing_accuracy": round(sum(r["pred"] == r["true"] for r in passed) / len(passed), 3) if passed else None,
         "calibration": summarize([{**r, "top3": []} for r in g])["calibration"] if g else [],
     }
+
+
+# --- images ---------------------------------------------------------------------------------
+
+def evaluate_images(service, per_category: int = 40, seed: int = 0, split: str = "folder",
+                    weights: tuple[float, ...] = (0.0, 0.3, 0.5, 0.7, 1.0),
+                    progress: Callable[[str, int, int], None] | None = None) -> dict:
+    """Held-out sorted *pictures*: text-only vs image-only vs blends. Each picture is hidden from
+    both indexes (with split="folder": its whole folder). Aggregates only."""
+    service.check_ready()
+    from pathlib import Path
+
+    from .image_index import is_image
+
+    img = service.image_index()
+    cats = [c for c in service.categories(refresh=True) if c.usable and c.suggest and c.path]
+    rng = random.Random(seed)
+    holdout = []
+    for c in cats:
+        rows = service.store.query("SELECT id, relpath FROM image_examples WHERE category_key = ? AND model = ?",
+                                   (category_key(c), img.embedder.model_name))
+        rng.shuffle(rows)
+        for r in rows[:per_category]:
+            p = c.path / r["relpath"]
+            if p.is_file() and is_image(p):
+                holdout.append({"img_id": r["id"], "path": p, "category": c.name, "key": category_key(c),
+                                "folder": os.path.dirname(r["relpath"]), "rel": r["relpath"]})
+    if not holdout:
+        raise ValueError("No sorted pictures in the image index: update the index first.")
+    text_rows = service.store.query("SELECT id, category_key, relpath FROM examples WHERE model = ?",
+                                    (service.settings.embedding_model,))
+    img_rows = service.store.query("SELECT id, category_key, relpath FROM image_examples WHERE model = ?",
+                                   (img.embedder.model_name,))
+
+    def hide(rows, h):
+        if split == "folder":
+            return {r["id"] for r in rows if r["category_key"] == h["key"] and os.path.dirname(r["relpath"]) == h["folder"]}
+        return {r["id"] for r in rows if r["category_key"] == h["key"] and r["relpath"] == h["rel"]}
+
+    allowed = {category_key(c) for c in cats}
+    name_of = {category_key(c): c.name for c in cats}
+    cases = []
+    text_clf = Classifier(service.categories(), ExampleDecider(service.example_index()))  # text only
+    for i, h in enumerate(holdout, 1):
+        if progress:
+            progress("pictures", i, len(holdout))
+        ev = service.read_file(h["path"])
+        text_clf.decider_kwargs = {"exclude_ids": hide(text_rows, h)}
+        t = text_clf.classify(ev)
+        p_text = {a["folder"]: a["probability"] for a in t.alternatives}
+        vec = img.encode_file(h["path"])
+        p_img = img.query(vec, allowed, hide(img_rows, h))[0] if vec is not None else {}
+        cases.append({"true": h["category"], "p_text": p_text,
+                      "p_img": {name_of[k]: v for k, v in p_img.items()}})
+
+    names = [c.name for c in cats]
+    out = {}
+    for w in weights:
+        right = 0
+        rows = []
+        for c in cases:
+            raw = {n: max(c["p_text"].get(n, 0.0), 1e-4) ** (1 - w) * max(c["p_img"].get(n, 0.0), 1e-4) ** w
+                   for n in names}
+            tot = sum(raw.values())
+            pred = max(raw, key=raw.get)
+            rows.append({"true": c["true"], "pred": pred, "confidence": raw[pred] / tot, "top3": []})
+            right += pred == c["true"]
+        s = summarize(rows)
+        out[w] = {"accuracy": s["accuracy"], "per_category": s["per_category"], "calibration": s["calibration"],
+                  "thresholds": s["thresholds"]}
+    return {"pictures": len(cases), "split": split, "by_weight": out}

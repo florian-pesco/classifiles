@@ -18,7 +18,8 @@ inbox file ─► extract (name, type, metadata, text/OCR snippet)
   models (an embedding model for "learn from my folders", optionally Laya) are downloaded once from
   Hugging Face. That download sends no data, and afterwards the models load offline (`HF_HUB_OFFLINE`,
   telemetry disabled). A test checks that classification opens no network connections.
-  Text recognition (OCR) for scans and images runs locally too. The "downloaded from" hint reads
+  Text recognition (OCR) for scans and images, and the image model that compares pictures, run
+  locally too. The "downloaded from" hint reads
   Windows' local download note via PowerShell and keeps only the website's domain.
 - **Gentle on the hardware.** GPU memory is capped (default 25%). Indexing runs in a background thread
   at low CPU priority, in small batches with pauses, is cancellable and incremental, and is bounded by

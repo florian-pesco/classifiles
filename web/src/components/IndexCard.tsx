@@ -75,6 +75,16 @@ export function IndexCard({ active, notify, fail }: {
           {s.reused ?? 0} unchanged, {s.removed ?? 0} removed.
         </p>
       )}
+      {st.images?.enabled && (
+        <p className="small muted">
+          Pictures: {st.images.state === 'running'
+            ? `${st.images.message ?? 'reading pictures'}${st.images.total ? ` · ${st.images.done ?? 0}/${st.images.total}` : ''}…`
+            : st.images.total
+              ? `${st.images.total.toLocaleString()} sorted pictures are compared with inbox pictures by what they look like.`
+              : 'not indexed yet. Update the index to compare inbox pictures with your sorted pictures.'}
+          {st.images.state === 'failed' && <span className="warn-text"> Failed: {st.images.error}</span>}
+        </p>
+      )}
       {st.catalog?.enabled && (
         <p className="small muted">
           Duplicate check: {st.catalog.state === 'running'
@@ -90,6 +100,7 @@ export function IndexCard({ active, notify, fail }: {
             <span className="grow">{c.name}</span>
             <span className="small muted">
               {c.examples} examples{c.learned ? ` + ${c.learned} learned` : ''}
+              {st.images?.per_category?.[c.name] ? ` · ${st.images.per_category[c.name]} pictures` : ''}
             </span>
           </li>
         ))}

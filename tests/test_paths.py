@@ -36,7 +36,7 @@ def test_top_level_when_no_folder_has_a_majority():
 def test_folder_names_from_file_names():
     assert name_tokens("ha05-solution1-1.pdf") == ["ha", "solution"]
     assert name_tokens("IMG_20250510_221937713.jpg") == []
-    assert suggest_folder_name(["Econ2_slides_chapter3.pdf", "Econ2_exercise_04.pdf", "econ2-exam.pdf"]) == "Econ"
+    assert suggest_folder_name(["Econ2_Slides_chapter3.pdf", "Econ2_Exercise_04.pdf", "econ2-exam.pdf"]) == "Econ"
     assert suggest_folder_name(["Projektarbeit Smart Home.pdf"]) == "Projektarbeit Smart Home"
     assert suggest_folder_name(["2024-01-01.pdf"]) == ""
 
@@ -126,8 +126,8 @@ def test_new_folder_suggestion_groups_similar_inbox_files(ex_service, sorted_tre
     ids = [r["id"] for r in rows[:3]]
     v = np.ones(4) / 2
     far = np.array([1.0, 0, 0, 0])
-    cands = [{"id": ids[0], "category": "Finance", "parent": "", "name": "Econ2_slides.pdf", "vector": v},
-             {"id": ids[1], "category": "Finance", "parent": "", "name": "Econ2_exercise.pdf", "vector": v},
+    cands = [{"id": ids[0], "category": "Finance", "parent": "", "name": "Econ2_Slides.pdf", "vector": v},
+             {"id": ids[1], "category": "Finance", "parent": "", "name": "Econ2_Exercise.pdf", "vector": v},
              {"id": ids[2], "category": "Finance", "parent": "", "name": "2025.pdf", "vector": far}]
     ex_service._suggest_new_folders(cands)
     got = {r["id"]: r["new_folder"] for r in ex_service.proposals(scan_id)}
@@ -140,10 +140,10 @@ def test_new_folder_suggestion_groups_similar_inbox_files(ex_service, sorted_tre
 
 
 @pytest.mark.parametrize("sub,name,expected", [
-    ("Lectures/Econ 1", "Econ2_slides_chapter1.txt", "Lectures/Econ 2"),
+    ("Lectures/Econ 1", "Econ2_Slides_chapter1.txt", "Lectures/Econ 2"),
     ("2025", "Rechnung_2026_01.pdf", "2026"),
     ("Kunden/Order35", "order 36 notes.txt", "Kunden/Order36"),
-    ("Lectures/Econ 1", "Econ1_slides.txt", None),        # same number
+    ("Lectures/Econ 1", "Econ1_Slides.txt", None),        # same number
     ("Lectures/Analysis", "Analysis2.pdf", None),       # folder has no number
     ("2025", "Rechnung_05.pdf", None),                     # no year in the name
     ("", "Econ2.pdf", None),

@@ -45,6 +45,9 @@ class SettingsPatch(BaseModel):
     ocr_images: bool | None = None
     use_download_source: bool | None = None
     second_opinion: bool | None = None
+    image_similarity: bool | None = None
+    image_weight: float | None = None
+    images_per_category: int | None = None
     detect_duplicates: bool | None = None
     duplicates_in_sorted: bool | None = None
     llm_model: str | None = None
@@ -100,6 +103,10 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
             values["max_files"] = values["max_files"] or None
         if "ocr_pdf_pages" in values and not 0 <= values["ocr_pdf_pages"] <= 5:
             raise HTTPException(400, "ocr_pdf_pages must be between 0 and 5")
+        if "image_weight" in values and not 0 <= values["image_weight"] <= 1:
+            raise HTTPException(400, "image_weight must be between 0 and 1")
+        if {"image_similarity", "image_weight"} & set(values):
+            svc.reset_decider()
         if "llm_max_files" in values and not 1 <= values["llm_max_files"] <= 1000:
             raise HTTPException(400, "llm_max_files must be between 1 and 1000")
         if "gpu_memory_fraction" in values and not 0.05 <= values["gpu_memory_fraction"] <= 0.9:

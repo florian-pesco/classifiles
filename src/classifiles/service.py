@@ -16,6 +16,7 @@ from .deciders.examples import ExampleDecider
 from .embedder import Embedder
 from . import llm
 from .duplicates import Catalog, find_duplicates
+from .image_index import ImageEmbedder, ImageIndex, is_image
 from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
@@ -50,6 +51,7 @@ class ClassifilesService:
         self._llm_cancel = threading.Event()
         self.store = store or Store(self.settings.db_path)
         self._catalog = Catalog(self.store)
+        self._image_index: ImageIndex | None = None
 
     # --- categories, rules & model -----------------------------------------------------------
 
@@ -116,7 +118,8 @@ class ClassifilesService:
     def decider(self) -> Decider:
         if self._decider is None:
             if self.settings.backend == "examples":
-                self._decider = ExampleDecider(self.example_index())
+                images = self.image_index() if self.settings.image_similarity else None
+                self._decider = ExampleDecider(self.example_index(), images, self.settings.image_weight)
             else:
                 self._decider = make_decider(self.settings.backend, laya_model=self.settings.laya_model)
         return self._decider
@@ -125,6 +128,15 @@ class ClassifilesService:
         self._decider = None
 
     # --- example index ------------------------------------------------------------------
+
+    def image_index(self) -> ImageIndex:
+        """Image similarity index (lazy; the image model loads only when first used)."""
+        s = self.settings
+        if self._image_index is None or self._image_index.embedder.model_name != s.image_model:
+            embedder = ImageEmbedder(s.image_model, s.gpu_memory_fraction, s.cpu_threads)
+            self._image_index = ImageIndex(self.store, embedder, s.images_per_category)
+        self._image_index.per_category = s.images_per_category
+        return self._image_index
 
     def example_index(self) -> ExampleIndex:
         """The example index (created lazily; the embedding model loads only when first used)."""
@@ -144,9 +156,25 @@ class ClassifilesService:
         cats = self.categories(refresh=True)
         index = self.example_index()
         # the file list for duplicate detection is refreshed in the same background thread
-        after = (lambda: self._catalog.build(cats)) if self._catalog_wanted() else None
-        index.start_build(cats, on_done=after)
+        catalog = self._catalog_wanted()
+        images = self.image_index() if self.settings.image_similarity else None
+
+        def after():  # same background thread, after the text index
+            if catalog:
+                self._catalog.build(cats)
+            if images is not None:
+                images.build(cats)
+
+        index.start_build(cats, on_done=after if (catalog or images is not None) else None)
         return self.index_status()
+
+    def _image_status(self) -> dict:
+        if not self.settings.image_similarity:
+            return {"enabled": False}
+        idx = self.image_index()
+        counts = idx.counts()
+        return {**idx.status, "enabled": True, "model": idx.embedder.model_name, "total": sum(counts.values()),
+                "per_category": {c.name: counts.get(category_key(c), 0) for c in self.categories() if c.path}}
 
     def _catalog_wanted(self) -> bool:
         return self.settings.detect_duplicates and self.settings.duplicates_in_sorted
@@ -156,6 +184,8 @@ class ClassifilesService:
 
     def cancel_index_build(self) -> dict:
         self._catalog.cancel()
+        if self._image_index is not None:
+            self._image_index.cancel()
         if self._index:
             self._index.cancel()
         return self.index_status()
@@ -172,6 +202,7 @@ class ClassifilesService:
         return {"status": index.status, "model": index.embedder.model_name,
                 "model_loaded": index.embedder.loaded, "total": sum(sum(v.values()) for v in counts.values()),
                 "categories": per_category, "unlearned": len(self.unlearned_decisions()),
+                "images": self._image_status(),
                 "catalog": {**self._catalog.status, "files": self._catalog.count(),
                             "enabled": self._catalog_wanted()}}
 
@@ -431,6 +462,8 @@ class ClassifilesService:
         self.store.update("scans", scan_id, {"phase": "second_opinion", "llm_total": len(todo), "llm_done": 0})
         if self._index is not None:
             self._index.embedder.unload()  # free GPU memory for the language model
+        if self._image_index is not None:
+            self._image_index.embedder.unload()
         done = 0
         try:
             with llm.LLMClient(self.settings.llm_model, self.settings.llm_gpu_fraction,
@@ -697,7 +730,28 @@ class ClassifilesService:
             if m.created_dir:
                 self.invalidate()  # a new folder exists now: refresh the cached categories
         self._learn(learned)
+        self._learn_images(moved)
         return {"batch_id": batch_id if moved else None, "moved": moved, "errors": errors}
+
+    def _learn_images(self, moved: list[dict]) -> None:
+        """Applied pictures become image examples of their category (background, if images are on
+        and the image index has been built)."""
+        if not self.settings.image_similarity:
+            return
+        items = []
+        for m in moved:
+            if m["action"] == "delete" or not is_image(m["dst"]):
+                continue
+            mv = self.store.one("SELECT category_key FROM moves WHERE proposal_id = ? AND undone_at IS NULL "
+                                "ORDER BY id DESC LIMIT 1", (m["proposal_id"],))
+            key, rel = _learned_key(m["dst"], m["action"], mv["category_key"] if mv else None)
+            items.append((key, rel, Path(m["dst"])))
+        if not items:
+            return
+        index = self.image_index()
+        if index.size == 0:
+            return
+        threading.Thread(target=lambda: _quietly(index.add, items), daemon=True).start()
 
     def moves(self, limit: int = 500) -> list[dict]:
         return self.store.query("SELECT * FROM moves ORDER BY id DESC LIMIT ?", (limit,))
@@ -737,6 +791,8 @@ class ClassifilesService:
             if m["action"] != "delete":
                 self._catalog.remove(*forget[-1])
         self._forget(forget)
+        if self._image_index is not None:
+            self._image_index.remove([f for f in forget if f[0] != DELETE_KEY])
         return {"batch_id": batch_id, "restored": restored, "errors": errors}
 
     # --- trash --------------------------------------------------------------------------
