@@ -127,7 +127,9 @@ def test_choose_c_and_training_set():
 def test_blend():
     p = tr.blend({"a": 0.9, "b": 0.1}, {"a": 0.2, "b": 0.8}, 0.5)
     assert abs(sum(p.values()) - 1) < 1e-9 and p["a"] == pytest.approx(0.6)  # sqrt(.9·.2) vs sqrt(.1·.8)
-    assert tr.blend({"a": 1.0}, {"b": 1.0}, 0.0)["a"] > 0.99
+    # a category the trained model doesn't know (Delete) keeps the neighbour probability
+    p = tr.blend({"a": 0.5, "b": 0.2, "Delete": 0.3}, {"a": 0.1, "b": 0.9}, 0.5)
+    assert p["Delete"] == pytest.approx(0.3) and sum(p.values()) == pytest.approx(1) and p["b"] > p["a"]
 
 
 def test_evaluation_never_trains_on_test_files(ex_service, sorted_tree, monkeypatch):
@@ -151,3 +153,15 @@ def test_evaluation_never_trains_on_test_files(ex_service, sorted_tree, monkeypa
     assert all(len(e) >= report["files"] for e in file_runs)
     assert all(len(f) > len(e) for e, f in zip(file_runs, folder_runs))
     assert all(e <= known for e in excluded) and file_runs[0] == file_runs[1]
+
+
+def test_temperature_scaling_divides_the_scores():
+    rng = np.random.default_rng(4)
+    X = np.vstack([_blobs(40, rng.normal(size=8), rng, 0.8) for _ in range(3)])
+    y = ["a"] * 40 + ["b"] * 40 + ["c"] * 40
+    T = tr.fit_temperature(X, y, None, C=1.0)
+    assert T in tr.T_GRID
+    m = tr.fit(X, y)
+    sharp = m.predict_proba(X).max(axis=1).mean()
+    m.temperature = 0.5
+    assert m.predict_proba(X).max(axis=1).mean() > sharp  # lower temperature: more confident

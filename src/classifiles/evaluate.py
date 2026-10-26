@@ -19,7 +19,7 @@ from typing import Callable
 from .classifier import Classifier
 from .deciders import make_decider
 from .deciders.examples import ExampleDecider
-from .examples import category_key
+from .examples import DELETE_KEY, category_key
 from .extract.base import Evidence
 from .source import download_sources
 
@@ -104,7 +104,7 @@ def evaluate(service, backends: list[str], per_category: int = 30, seed: int = 0
 def decided_proposals(service) -> list[dict]:
     """Proposals you decided in Review (accepted, overridden or applied), excluding rule hits."""
     return service.store.query("""
-        SELECT p.id, p.evidence, p.target, p.final_target, p.confidence, p.alternatives, p.decided_via,
+        SELECT p.id, p.evidence, p.target, p.final_target, p.confidence, p.alternatives, p.decided_via, p.source,
                s.backend, m.dst, m.action, m.category_key
         FROM proposals p
         JOIN scans s ON s.id = p.scan_id
@@ -406,7 +406,8 @@ def _decision_cases(service) -> list[dict]:
     and as learned example), so a fold can leave exactly those out of training."""
     from .service import _learned_key
 
-    rows = decided_proposals(service)
+    # duplicates are decided by being identical to another file, not by what they are about
+    rows = [r for r in decided_proposals(service) if r["source"] != "duplicate"]
     examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
                                    (service.settings.embedding_model,))
     by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
@@ -447,7 +448,8 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
     index.fill_query_vectors(cats)
     service.fill_applied_query_vectors()
     by_key = {category_key(c): c.name for c in cats}
-    rows = index.training_rows(set(by_key))
+    # Delete stays with the neighbour vote (see trained.py)
+    rows = index.training_rows({k for k in by_key if k != DELETE_KEY})
     if not rows:
         raise ValueError("Nothing to train on: build the example index first.")
     decider = ExampleDecider(service.example_index())
@@ -460,7 +462,7 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
         rng.shuffle(order)
         fold_of = {i: n % folds for n, i in enumerate(order)}
         out = {"neighbours": [], "trained": [], **{f"blend {a}": [] for a in BLENDS}}
-        C = None
+        C = T = None
         for f in range(folds):
             test = [i for i in range(len(cases)) if fold_of[i] == f]
             if not test:
@@ -468,20 +470,22 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
             X, y, w = tr.training_set(rows, train_exclude([cases[i] for i in test]), applied_weight)
             if C is None:
                 C, _ = tr.choose_C(X, y, w, threads=threads, seed=seed)
+                T = tr.fit_temperature(X, y, w, C, threads=threads, seed=seed)
             model = tr.fit(X, y, w, C, threads)
+            model.temperature = T
             for n, i in enumerate(test, 1):
                 if progress:
                     progress(f"{label}: fold {f + 1}/{folds}", n, len(test))
                 case = cases[i]
                 p_knn, _, extras = decider.classify_evidence(case["ev"], cats, exclude_ids=knn_exclude(case))
-                p_tr = {by_key[k]: p for k, p in model.probs(extras["vector"], set(by_key)).items()}
+                p_tr = {by_key[k]: p for k, p in model.probs(extras["vector"]).items() if k in by_key}
                 variants = {"neighbours": p_knn, "trained": p_tr,
                             **{f"blend {a}": tr.blend(p_knn, p_tr, a) for a in BLENDS}}
                 for name, p in variants.items():
                     ranked = sorted(p.items(), key=lambda kv: kv[1], reverse=True)
                     out[name].append({"true": case["true"], "pred": ranked[0][0], "confidence": ranked[0][1],
                                       "top3": [k for k, _ in ranked[:3]]})
-        return {"C": C, "results": {name: summarize(r) for name, r in out.items()}}
+        return {"C": C, "temperature": T, "results": {name: summarize(r) for name, r in out.items()}}
 
     result: dict = {"training_examples": len(rows), "folds": folds, "applied_weight": applied_weight,
                     "per_category_examples": dict(Counter(by_key[r["category_key"]] for r in rows))}

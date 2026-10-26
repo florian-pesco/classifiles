@@ -280,7 +280,7 @@ def _print_comparison(section: str, sec: dict, details: bool) -> None:
     results = sec["results"]
     n = next(iter(results.values())).get("files", 0)
     t = Table("method", "accuracy", "top-3", "≥0.7: suggested / right", "≥0.9: suggested / right", "weakest category",
-              title=f"{section} ({n} files, C={sec['C']})")
+              title=f"{section} ({n} files, C={sec['C']}, T={sec.get('temperature')})")
     for name, r in results.items():
         if not r.get("files"):
             continue
