@@ -82,6 +82,9 @@ class Settings:
     image_model: str = "google/siglip2-base-patch16-224"
     images_per_category: int = 300
     image_weight: float = 0.5           # 0 = text only, 1 = image similarity only (for images)
+    # Learn from my decisions: after each decision in Review, undecided files of the same scan are
+    # re-scored with the decided files as temporary examples (no file access, no model run).
+    relearn_in_scan: bool = True
     # Exact duplicates (identical content): inbox files that already exist in a category folder or
     # several times in the inbox are proposed for Delete. Sorted folders need the file list, which
     # is built with "Update index".

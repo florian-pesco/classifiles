@@ -23,11 +23,13 @@ class Classification:
     alternatives: list[dict] = field(default_factory=list)  # [{"folder", "probability"}], best first
     reason: str = ""
     neighbours: list[dict] = field(default_factory=list)  # example backend: [{category, dir, weight}]
-    vector: object = None  # example backend: query vector (not stored)
+    vector: object = None  # example backend: text query vector
+    image_vector: object = None  # example backend: picture vector (pictures only)
 
     def to_dict(self) -> dict:
         d = asdict(self)
         d.pop("vector", None)
+        d.pop("image_vector", None)
         return d
 
 
@@ -64,4 +66,4 @@ class Classifier:
         best, p = ranked[0]
         alts = [{"folder": f, "probability": round(q, 4)} for f, q in ranked[:4]]
         return Classification(best, round(p, 4), self.decider.name, alts, reason,
-                              extras.get("neighbours", []), extras.get("vector"))
+                              extras.get("neighbours", []), extras.get("vector"), extras.get("image_vector"))

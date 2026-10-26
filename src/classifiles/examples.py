@@ -103,6 +103,53 @@ def sample_folder(root: Path, cap: int, max_walk: int = MAX_WALK) -> list[str]:
     return out
 
 
+# The stored examples most similar to one query: (category keys, relpaths, similarities).
+Candidates = tuple[list[str], list[str], list[float]]
+
+
+def nearest(matrix: np.ndarray, vecs: np.ndarray, k: int, chunk: int = 256) -> list[tuple[np.ndarray, np.ndarray]]:
+    """For each query vector, the row numbers and similarities of the k most similar matrix rows.
+    Several queries are compared in one matrix product (used when re-scoring a whole scan)."""
+    out = []
+    kk = min(k, len(matrix))
+    if kk == 0:
+        return [(np.zeros(0, int), np.zeros(0, np.float32)) for _ in vecs]
+    for start in range(0, len(vecs), chunk):
+        sims = np.atleast_2d(vecs[start:start + chunk]) @ matrix.T
+        top = np.argpartition(-sims, kk - 1, axis=1)[:, :kk]
+        out += [(row, sims[j, row]) for j, row in enumerate(top)]
+    return out
+
+
+def with_extra(base: Candidates, vec: np.ndarray, allowed: set[str],
+               extra: list[tuple[str, str, np.ndarray]] | None) -> Candidates:
+    """The stored candidates plus temporary examples [(category_key, relpath, vector)]."""
+    keys, rels, sims = list(base[0]), list(base[1]), list(base[2])
+    for key, rel, v in extra or []:
+        if key in allowed:
+            keys.append(key)
+            rels.append(rel)
+            sims.append(float(v @ vec))
+    return keys, rels, sims
+
+
+def vote(keys: list[str], rels: list[str], sims: list[float], k: int, temperature: float
+         ) -> tuple[dict[str, float], list[Neighbour]]:
+    """The k most similar candidates vote for their category, weighted exp((sim − best) / T)."""
+    if not sims:
+        return {}, []
+    order = np.argsort(-np.asarray(sims))[:k]
+    best = sims[order[0]]
+    scores: dict[str, float] = {}
+    neighbours = []
+    for t in order:
+        w = float(np.exp((sims[t] - best) / temperature))
+        scores[keys[t]] = scores.get(keys[t], 0.0) + w
+        neighbours.append(Neighbour(keys[t], rels[t], float(sims[t]), w))
+    total = sum(scores.values())
+    return {key: s / total for key, s in scores.items()}, neighbours
+
+
 class ExampleIndex:
     def __init__(self, store: Store, embedder: Embedder, per_category: int = 3000,
                  content_per_category: int = 300, k: int = 20, temperature: float = 0.05):
@@ -150,33 +197,32 @@ class ExampleIndex:
             out.setdefault(r["category_key"], {})[r["origin"]] = r["n"]
         return out
 
-    def query(self, vec: np.ndarray, allowed: set[str], exclude_ids: set[int] | None = None,
-              k: int | None = None) -> tuple[dict[str, float], list[Neighbour]]:
-        """Probability per allowed category key from the k nearest examples, plus the nearest ones."""
+    def candidates(self, vecs: np.ndarray, allowed: set[str], exclude_ids: set[int] | None = None,
+                   k: int | None = None) -> list[Candidates]:
+        """The k nearest stored examples of each query vector (one row of `vecs` per query)."""
         ids, key_codes, keys, relpaths, matrix = self._get()
         if not len(ids):
-            return {}, []
+            return [([], [], []) for _ in vecs]
         allowed_codes = [i for i, key in enumerate(keys) if key in allowed]
         mask = np.isin(key_codes, allowed_codes)
         if exclude_ids:
             mask &= ~np.isin(ids, list(exclude_ids))
         idx = np.flatnonzero(mask)
-        if not len(idx):
-            return {}, []
-        sims = matrix[idx] @ vec
-        k = min(k or self.k, len(idx))
-        top = np.argpartition(-sims, k - 1)[:k]
-        top = top[np.argsort(-sims[top])]
-        weights = np.exp((sims[top] - sims[top[0]]) / self.temperature)
-        scores: dict[str, float] = {}
-        for t, w in zip(top, weights):
-            key = keys[key_codes[idx[t]]]
-            scores[key] = scores.get(key, 0.0) + float(w)
-        total = sum(scores.values())
-        probs = {key: s / total for key, s in scores.items()}
-        neighbours = [Neighbour(keys[key_codes[idx[t]]], relpaths[idx[t]], float(sims[t]), float(w))
-                      for t, w in zip(top, weights)]  # all k, best first
-        return probs, neighbours
+        sub = matrix[idx] if len(idx) < len(ids) else matrix
+        return [([keys[key_codes[idx[t]]] for t in top], [relpaths[idx[t]] for t in top], [float(s) for s in sims])
+                for top, sims in nearest(sub, vecs, k or self.k)]
+
+    def query(self, vec: np.ndarray, allowed: set[str], exclude_ids: set[int] | None = None,
+              k: int | None = None, extra: list[tuple[str, str, np.ndarray]] | None = None,
+              base: Candidates | None = None) -> tuple[dict[str, float], list[Neighbour]]:
+        """Probability per allowed category key from the k nearest examples, plus the nearest ones.
+
+        extra: temporary examples [(category_key, relpath, vector)] that compete with the stored
+        ones, e.g. the files the user just decided in Review (see service.relearn).
+        base: the stored candidates, if already computed (candidates())."""
+        if base is None:
+            base = self.candidates(vec[None, :], allowed, exclude_ids, k)[0]
+        return vote(*with_extra(base, vec, allowed, extra), k or self.k, self.temperature)
 
     # --- building -----------------------------------------------------------------------
 

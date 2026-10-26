@@ -83,10 +83,31 @@ An inbox folder is never offered as a category, even if it sits inside a root.
      `Econ 1` folder, or `…_2026_…` next to `2025`), a new sibling folder is proposed. Until you
      click it, the file goes to the existing parent folder. New folders are only ever created on
      Apply, and Undo removes them again if they're empty.
-4. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
+4. **Review together (batches).** Above the list, classifiles suggests groups of files that are
+   probably decided the same way:
+   - **Same name pattern**: names that differ only in numbers, dates or IDs, e.g. `Scan_‹date›_‹n›.pdf`;
+   - **Similar content**: files whose names/text are very close;
+   - **Same suggestion**: confident files that all go to the same category and folder;
+   - **Same doubt**: unsure files where the model hesitates between the same two categories.
+
+   Each card shows how many files are left to decide and where the model puts them ("all → …" or
+   "4 → A · 2 → B"). **Click a card** to show only its files (the "Batch: …" chip ✕ shows all again).
+   - **Select files** with the checkbox on each row (Shift+click selects a range) or **Select all shown**.
+     The footer then shows the bulk actions: **✓ Accept** (each as suggested), **Move all to…** (one
+     category for all), **Folder…** (one folder inside the category, when they share a category),
+     **✕ Keep in inbox**, **↺ Reset**.
+   - **Learn from my decisions:** after each decision (single or bulk), the other undecided files of
+     this scan are compared again right away, with your decision counted as an extra example. Similar
+     files then follow it: they get the new category and folder, are marked **↻ learned**, and the *Why*
+     shows "your decision: … → …". A message says how many changed. So deciding one file of a batch
+     often fixes the rest; check them and accept. Reset a decision and its effect goes away again.
+     This reuses what the scan computed: no file is read again, no model runs. Switch it off in
+     Settings. Your folders learn the files for good only when you apply.
+     (Works for scans made with this version; older scans have no stored data to compare.)
+5. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
    happens until you confirm.
-5. **Undo last apply** reverses the last batch. Older batches can be undone on the History page.
-6. **Older scans:** pick one from the scan dropdown, or open it from *History & trash*.
+6. **Undo last apply** reverses the last batch. Older batches can be undone on the History page.
+7. **Older scans:** pick one from the scan dropdown, or open it from *History & trash*.
 
 Status names: **Suggested** (confidence ≥ threshold) · **Needs review** (below) · **Accepted** ·
 **Kept in inbox** · **Done** (moved, copied or in trash).
@@ -144,6 +165,7 @@ never scanned.
 | Pictures | Inbox pictures are compared with pictures you already sorted, by what they look like (local image model, ≈0.3 GB GPU memory; up to 300 sorted pictures per category, built with **Update index**). Combined with the name/text result; **How much the picture counts** sets the mix (default 50%). Review shows "looks like: …" in the details. |
 | Duplicates | Files with byte-for-byte identical content are found **within the inbox** (e.g. downloaded twice) and **against your folders** (already sorted). They're proposed for Delete (undoable trash) with "identical to …"; the copy to keep is sorted normally (the one without "(1)"/"Kopie", else the oldest). **Compare** (on the row) or **Review duplicates →** (next to the filter chips) shows both copies side by side, re-checks them, lists size, fingerprint, dates and names, and explains why this copy goes; keys ← → browse, **D** delete this copy, **K** keep both. Apply checks once more and never deletes a duplicate whose kept copy is gone or changed. The folder check uses a file list built together with **Update index** (Categories). Duplicate deletions are not learned as "junk". |
 | Second opinion | For files below the threshold (with readable text or a meaningful name), a local language model takes a second look. Review then shows **✓ both agree** or **2nd opinion: X** with *use it*. It's a hint only: it never changes the confidence or accepts anything. Model: Qwen3.5 2B (≈4 GB GPU memory, ~0.6 s per file) or Qwen3 4B (≈8 GB). It runs in its own process during that step of a scan and is closed afterwards; **Skip** stops it. The first use downloads the model once. |
+| Learn from my decisions | After each decision in Review, the other undecided files of the same scan are re-scored with your decided files as extra examples (on by default; see Review → batches). Instant, no file access, no model run. |
 | Sample file names | For categories **without** a description, this many file names from the folder are shown to the model instead. |
 
 Category, rule and setting changes all apply to the **next scan**. Existing proposals keep their

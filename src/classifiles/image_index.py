@@ -22,7 +22,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .examples import BATCH, PAUSE, category_key, sample_folder
+from .examples import BATCH, PAUSE, Candidates, category_key, nearest, sample_folder, vote, with_extra
 from .extract import kind_of
 from .store import Store, now
 from .taxonomy import Category
@@ -162,28 +162,28 @@ class ImageIndex:
             "SELECT category_key, COUNT(*) AS n FROM image_examples WHERE model = ? GROUP BY category_key",
             (self.embedder.model_name,))}
 
-    def query(self, vec: np.ndarray, allowed: set[str], exclude_ids: set[int] | None = None):
-        """(probability per category key, [(category_key, relpath, similarity, weight)] best first)."""
+    def candidates(self, vecs: np.ndarray, allowed: set[str], exclude_ids: set[int] | None = None
+                   ) -> list[Candidates]:
+        """The k nearest stored pictures of each query vector (one row of `vecs` per query)."""
         ids, keys, rels, matrix = self._get()
         if not len(ids):
-            return {}, []
+            return [([], [], []) for _ in vecs]
         mask = np.array([k in allowed for k in keys])
         if exclude_ids:
             mask &= ~np.isin(ids, list(exclude_ids))
         idx = np.flatnonzero(mask)
-        if not len(idx):
-            return {}, []
-        sims = matrix[idx] @ vec
-        k = min(self.k, len(idx))
-        top = np.argpartition(-sims, k - 1)[:k]
-        top = top[np.argsort(-sims[top])]
-        weights = np.exp((sims[top] - sims[top[0]]) / self.temperature)
-        scores: dict[str, float] = {}
-        for t, w in zip(top, weights):
-            scores[keys[idx[t]]] = scores.get(keys[idx[t]], 0.0) + float(w)
-        total = sum(scores.values())
-        neighbours = [(keys[idx[t]], rels[idx[t]], float(sims[t]), float(w)) for t, w in zip(top, weights)]
-        return {key: s / total for key, s in scores.items()}, neighbours
+        return [([keys[idx[t]] for t in top], [rels[idx[t]] for t in top], [float(s) for s in sims])
+                for top, sims in nearest(matrix[idx], vecs, self.k)]
+
+    def query(self, vec: np.ndarray, allowed: set[str], exclude_ids: set[int] | None = None,
+              extra: list[tuple[str, str, np.ndarray]] | None = None, base: Candidates | None = None):
+        """(probability per category key, [(category_key, relpath, similarity, weight)] best first).
+        extra: temporary examples [(category_key, relpath, vector)], e.g. pictures just decided;
+        base: the stored candidates, if already computed (candidates())."""
+        if base is None:
+            base = self.candidates(vec[None, :], allowed, exclude_ids)[0]
+        probs, nbs = vote(*with_extra(base, vec, allowed, extra), self.k, self.temperature)
+        return probs, [(n.category_key, n.relpath, n.similarity, n.weight) for n in nbs]
 
     def encode_file(self, path: Path) -> np.ndarray | None:
         vecs, ok = self.embedder.encode_paths([path])

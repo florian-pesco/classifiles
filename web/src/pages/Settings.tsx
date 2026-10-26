@@ -29,6 +29,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [ocrImages, setOcrImages] = useState(settings.ocr_images)
   const [useSource, setUseSource] = useState(settings.use_download_source)
   const [secondOpinion, setSecondOpinion] = useState(settings.second_opinion)
+  const [relearn, setRelearn] = useState(settings.relearn_in_scan)
   const [images, setImages] = useState(settings.image_similarity)
   const [imageWeight, setImageWeight] = useState(settings.image_weight)
   const [imagesPer, setImagesPer] = useState(settings.images_per_category)
@@ -54,6 +55,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         ocr_images: ocrImages,
         use_download_source: useSource,
         second_opinion: secondOpinion,
+        relearn_in_scan: relearn,
         image_similarity: images,
         image_weight: imageWeight,
         images_per_category: imagesPer,
@@ -157,6 +159,20 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="check field-check">
           <input type="checkbox" checked={dupesSorted} disabled={!dupes} onChange={e => setDupesSorted(e.target.checked)} />
           Also find inbox files that already exist in your folders (uses the file list built by "Update index")
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>Learn from my decisions</h3>
+        <p className="muted small">
+          When you accept a file in Review, the other undecided files of the same scan are compared again right away,
+          with your decision counted as an extra example. Similar files then follow it (marked "↻ learned"). This
+          uses what the scan already computed: no file is read again and no model runs. Taking a decision back also
+          takes its effect back. Your folders only learn the files for good when you apply.
+        </p>
+        <label className="check field-check">
+          <input type="checkbox" checked={relearn} onChange={e => setRelearn(e.target.checked)} />
+          Update the other suggestions after each decision (needs "Learn from my folders")
         </label>
       </section>
 

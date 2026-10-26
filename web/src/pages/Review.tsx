@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   api, humanSize, shortDate,
-  type Category, type PlannedMove, type Proposal, type Scan, type Settings, type Status,
+  type Category, type PlannedMove, type Proposal, type ReviewAction, type ReviewBatch, type Scan, type Settings,
+  type Status,
 } from '../api'
+import { BatchPanel } from '../components/BatchPanel'
+import { BulkBar } from '../components/BulkBar'
 import { CategorySelect } from '../components/CategorySelect'
 import { CompareDuplicate } from '../components/CompareDuplicate'
 import { PathEditor } from '../components/PathEditor'
@@ -67,6 +70,10 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   // in it don't reshuffle the list), plus the one to start with.
   const [compare, setCompare] = useState<{ ids: number[]; start: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [batches, setBatches] = useState<ReviewBatch[]>([])
+  const [batch, setBatch] = useState<ReviewBatch | null>(null) // list filtered to this batch
+  const [selected, setSelected] = useState<Set<number>>(new Set())
+  const lastClicked = useRef<number | null>(null)
 
   const loadScans = useCallback(async () => {
     const s = await api.scans()
@@ -86,6 +93,16 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       .then(([s, rows]) => { setScan(s); setProposals(rows) })
       .catch(fail)
   }, [scanId, fail])
+
+  // Batch suggestions: refreshed whenever decisions change (debounced), not while scanning.
+  const decisions = useMemo(() => proposals.map(p => `${p.id}:${p.status}:${p.final_target}`).join(','), [proposals])
+  useEffect(() => {
+    if (scanId == null || scan?.status === 'running' || !decisions) { setBatches([]); return }
+    const t = setTimeout(() => api.reviewBatches(scanId).then(setBatches).catch(fail), 300)
+    return () => clearTimeout(t)
+  }, [scanId, scan?.status, decisions, fail])
+  // A new scan starts without a batch filter or selection.
+  useEffect(() => { setBatch(null); setSelected(new Set()) }, [scanId])
 
   // Poll while running.
   useEffect(() => {
@@ -129,11 +146,53 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
 
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase()
-    const rows = proposals.filter(p =>
+    const inBatch = batch ? new Set(batch.ids) : null
+    const rows = proposals.filter(p => (!inBatch || inBatch.has(p.id)) &&
       (filter === 'all' || (filter === 'duplicates' ? !!p.duplicate_of : p.status === filter)) &&
       (!needle || p.name.toLowerCase().includes(needle) || (p.final_target ?? '').toLowerCase().includes(needle)))
     return sortRows(rows, sort)
-  }, [proposals, filter, search, sort])
+  }, [proposals, filter, search, sort, batch])
+
+  const pickBatch = (b: ReviewBatch | null) => {
+    setBatch(b)
+    setSelected(new Set())
+    if (b) setFilter('all')
+  }
+
+  // Selection: click toggles one row, Shift+click selects the range from the last clicked row.
+  const toggle = (id: number, shift: boolean) => {
+    setSelected(sel => {
+      const next = new Set(sel)
+      const ids = visible.map(p => p.id)
+      const from = lastClicked.current == null ? -1 : ids.indexOf(lastClicked.current)
+      const to = ids.indexOf(id)
+      if (shift && from >= 0 && to >= 0) {
+        const on = !sel.has(id)
+        for (const x of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) {
+          if (on) next.add(x); else next.delete(x)
+        }
+      } else if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+    lastClicked.current = id
+  }
+  const allVisibleSelected = visible.length > 0 && visible.every(p => selected.has(p.id))
+  const selectAllVisible = () => setSelected(allVisibleSelected ? new Set() : new Set(visible.map(p => p.id)))
+  const selectedRows = useMemo(() => proposals.filter(p => selected.has(p.id)), [proposals, selected])
+
+  // Merge updated proposals into the list, and say how many others followed the decision.
+  const merge = (updated: Proposal[]) => {
+    const by = new Map(updated.map(p => [p.id, p]))
+    setProposals(ps => ps.map(x => by.get(x.id) ?? x))
+  }
+  const reportRelearned = (others: Proposal[]) => {
+    if (!others.length) return
+    const moved = others.filter(p => p.relearned).length
+    notify(moved
+      ? `Learned from your decision: ${moved} similar file${moved === 1 ? '' : 's'} updated (marked ↻ learned).`
+      : `${others.length} suggestion${others.length === 1 ? '' : 's'} went back to the model's own guess.`)
+  }
 
   const startScan = async () => {
     try {
@@ -147,7 +206,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   }
 
   // Optimistic review: update the row immediately, roll back if the server refuses.
-  const review = async (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) => {
+  const review = async (p: Proposal, action: ReviewAction, folder?: string, subpath?: string) => {
     const optimistic: Proposal = {
       ...p,
       status: action === 'accept' ? 'accepted' : action === 'reject' ? 'rejected'
@@ -157,12 +216,29 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     }
     setProposals(ps => ps.map(x => (x.id === p.id ? optimistic : x)))
     try {
-      const saved = await api.review(p.id, action, folder, subpath)
-      setProposals(ps => ps.map(x => (x.id === p.id ? saved : x)))
+      const { relearned_others: others, ...saved } = await api.review(p.id, action, folder, subpath)
+      merge([saved, ...others])
+      reportRelearned(others)
     } catch (e) {
       setProposals(ps => ps.map(x => (x.id === p.id ? p : x)))
       fail(e)
     }
+  }
+
+  const bulk = async (action: ReviewAction, folder?: string, subpath?: string) => {
+    const ids = selectedRows.filter(p => p.status !== 'moved').map(p => p.id)
+    if (!ids.length) return
+    setBusy(true)
+    try {
+      const res = await api.bulkReview(ids, action, folder, subpath)
+      merge([...res.updated, ...res.relearned])
+      const verb = action === 'accept' ? 'Accepted' : action === 'reject' ? 'Kept in inbox:' : 'Reset'
+      notify(`${verb} ${res.updated.length} file${res.updated.length === 1 ? '' : 's'}`
+        + (res.errors.length ? `; ${res.errors.length} failed (${res.errors[0].error})` : '')
+        + (res.relearned.filter(p => p.relearned).length
+          ? `; ${res.relearned.filter(p => p.relearned).length} similar files updated from it (↻ learned).` : '.'))
+      setSelected(new Set())
+    } catch (e) { fail(e) } finally { setBusy(false) }
   }
 
   const acceptSuggested = async (topLevel = false) => {
@@ -287,6 +363,24 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
         <span className="muted small">threshold {threshold.toFixed(2)}</span>
       </nav>
 
+      {!running && <BatchPanel batches={batches} active={batch?.id ?? null} onPick={pickBatch} />}
+
+      {(batch || visible.length > 0) && (
+        <div className="select-line small">
+          <label className="check">
+            <input type="checkbox" checked={allVisibleSelected} onChange={selectAllVisible} disabled={!visible.length} />
+            Select all {visible.length} shown
+          </label>
+          {batch && (
+            <span className="chip active batch-chip" title={batch.why}>
+              Batch: {batch.title}
+              <button className="linkish" onClick={() => pickBatch(null)} aria-label="Show all files">✕</button>
+            </span>
+          )}
+          <span className="muted">Tip: Shift+click a checkbox to select a range.</span>
+        </div>
+      )}
+
       {proposals.length === 0 && !running && (
         <p className="empty">No proposals yet. Pick an inbox folder and press <b>Scan &amp; classify</b>.</p>
       )}
@@ -295,25 +389,32 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       <ul className="list">
         {visible.map(p => (
           <ProposalRow key={p.id} p={p} categories={categories} threshold={threshold}
+                       selected={selected.has(p.id)} onSelect={shift => toggle(p.id, shift)}
                        onCompare={() => openCompare(p.id)}
                        onReview={review} onPreview={() => setPreview(p)} />
         ))}
       </ul>
 
-      <footer className="actions">
-        <button onClick={() => acceptSuggested()} disabled={!counts.suggested}>
-          Accept all suggested ({counts.suggested ?? 0})
-        </button>
-        <button onClick={() => acceptSuggested(true)} disabled={!counts.suggested}
-                title="Accept the suggested categories, but put the files directly into the category folders">
-          … category only
-        </button>
-        <button className="primary" onClick={openPlan} disabled={!counts.accepted}>
-          Apply accepted ({counts.accepted ?? 0})
-        </button>
-        <span className="grow" />
-        <button onClick={undoLast}>Undo last apply</button>
-      </footer>
+      {selectedRows.length > 0 ? (
+        <footer className="actions bulk">
+          <BulkBar selected={selectedRows} categories={categories} onAction={bulk} onClear={() => setSelected(new Set())} />
+        </footer>
+      ) : (
+        <footer className="actions">
+          <button onClick={() => acceptSuggested()} disabled={!counts.suggested}>
+            Accept all suggested ({counts.suggested ?? 0})
+          </button>
+          <button onClick={() => acceptSuggested(true)} disabled={!counts.suggested}
+                  title="Accept the suggested categories, but put the files directly into the category folders">
+            … category only
+          </button>
+          <button className="primary" onClick={openPlan} disabled={!counts.accepted}>
+            Apply accepted ({counts.accepted ?? 0})
+          </button>
+          <span className="grow" />
+          <button onClick={undoLast}>Undo last apply</button>
+        </footer>
+      )}
 
       {preview && <Preview p={preview} onClose={() => setPreview(null)} onError={m => fail(new Error(m))} />}
       {compare && compareList.length > 0 && (
@@ -349,11 +450,13 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   )
 }
 
-function ProposalRow({ p, categories, threshold, onReview, onPreview, onCompare }: {
+function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, onPreview, onCompare }: {
   p: Proposal
   categories: Category[]
   threshold: number
-  onReview: (p: Proposal, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) => void
+  selected: boolean
+  onSelect: (shift: boolean) => void
+  onReview: (p: Proposal, action: ReviewAction, folder?: string, subpath?: string) => void
   onPreview: () => void
   onCompare: () => void
 }) {
@@ -368,13 +471,18 @@ function ProposalRow({ p, categories, threshold, onReview, onPreview, onCompare 
   const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
 
   return (
-    <li className={`row status-${p.status}${p.duplicate_of ? ' is-dup' : ''}`}>
+    <li className={`row status-${p.status}${p.duplicate_of ? ' is-dup' : ''}${selected ? ' selected' : ''}`}>
+      <input type="checkbox" className="pick" checked={selected} aria-label={`Select ${p.name}`}
+             onChange={() => undefined} onClick={e => onSelect(e.shiftKey)} />
       <div className="file">
         <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open}>{p.name}</button>
         <div className="muted small">
           {p.kind}{looks ? ` · ${looks}` : ''} · {humanSize(p.size)} · {p.evidence.modified?.slice(0, 10)}
           {source && <> · from <span title="Where it was downloaded from">{source}</span></>}
           {viaOcr && <> · <span title="Text read by OCR (scanned PDF)">OCR</span></>}
+          {p.relearned === 1 && !done && (
+            <> · <span className="badge learned" title="Updated from your decisions in this scan (see Why)">↻ learned</span></>
+          )}
           {' · '}<button className="linkish" onClick={onPreview}>preview</button>
         </div>
         {p.llm_choice && (
