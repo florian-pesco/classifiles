@@ -107,12 +107,14 @@ CREATE TABLE IF NOT EXISTS examples (
     has_content INTEGER NOT NULL DEFAULT 0,
     model TEXT NOT NULL,
     vector BLOB NOT NULL,                 -- float16, L2-normalised
+    qvector BLOB,                         -- the same file embedded like an inbox file (no folder), for training
     UNIQUE (category_key, relpath, origin)
 );
 """
 
 # Columns added after the first release: (table, column, definition). Applied to older databases.
 MIGRATIONS = [
+    ("examples", "qvector", "BLOB"),
     ("scans", "max_files", "INTEGER"),
     ("scans", "only_new", "INTEGER NOT NULL DEFAULT 0"),
     ("scans", "inbox_total", "INTEGER NOT NULL DEFAULT 0"),

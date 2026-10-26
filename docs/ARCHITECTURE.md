@@ -236,6 +236,35 @@ for each category folder:                                 query text = file name
   On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
   pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
 
+### 4h. Trained classifier (experimental, `trained.py`, `classifiles eval --trained`)
+
+Measured only so far; proposals still come from the neighbour vote (4a).
+
+- **Why:** the neighbour vote asks the 20 nearest examples. A trained model learns from all examples
+  at once what separates the categories, which may generalise better to new topics (folder split).
+- **Inbox-style vectors:** the stored example vector is made from `folder: <category>/… · file · type ·
+  content` (`doc_text`). The folder text contains the answer, and inbox files have no folder, so a
+  model trained on it would learn to read the folder name. Every example therefore also gets
+  `examples.qvector`: the same file embedded exactly like an inbox file (`inbox_text`, query
+  instruction, no folder).
+  - New and changed examples get both vectors during the index build.
+  - Older ones are filled by **Update index**: name-only examples from the stored path, with no disk
+    access; examples with read text are read once more.
+  - Learned examples are filled from the proposal's stored evidence (`fill_applied_query_vectors`).
+- **Model:** multinomial logistic regression (scikit-learn, lbfgs) on the 1024-dim inbox-style vectors.
+  - Categories are balanced (n / (classes · n_class)), and learned examples count `applied_weight`
+    (default 3).
+  - C is chosen from {0.3, 1, 3, 10} by 3-fold CV on balanced accuracy.
+  - Training takes under a second on 2 CPU threads.
+- **Evaluation:** `evaluate_trained` runs the file split, the folder split and real decisions, with
+  5 folds.
+  - The model is fitted per fold without that fold's test files: in the splits without all held-out
+    files, plus the test files' folders in the folder split; for decisions, without each file's own
+    scanned and learned examples.
+  - The neighbour vote hides the same files.
+  - Compared: neighbours, trained, and blends `P ∝ P_knn^(1−a) · P_trained^a`, a ∈ {0.25, 0.5, 0.75}.
+  - A test asserts that no training run contains a test file.
+
 ### 4g. Batches and learning from decisions (`batches.py`, `service.relearn`)
 
 - **Stored vectors.** Each example-model proposal keeps the vectors computed during the scan
@@ -398,7 +427,7 @@ One SQLite file, four tables:
 | `scans` | scan run | inbox, target_root (the roots at scan time), backend, threshold, max_files, only_new, status (running/done/failed), processed/total, inbox_total |
 | `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder, qvec/ivec (stored vectors), relearned |
 | `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), category_key, created_dir, moved_at, undone_at, purged_at (trash emptied) |
-| `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16) |
+| `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16), qvector (inbox-style, for training) |
 
 You can inspect it directly:
 
@@ -430,6 +459,7 @@ src/classifiles/
   embedder.py          local embedding model with resource caps (lazy, offline after download)
   examples.py          example index: sample folders, build/update, kNN query, learn/forget
   batches.py           batch suggestions for Review (name pattern, similar content, same proposal/doubt)
+  trained.py           experimental trained classifier (logistic regression on inbox-style vectors)
   evaluate.py          hold-out evaluation (`classifiles eval`)
 src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
 src/classifiles_cli/main.py  `classifiles` command (typer)

@@ -229,6 +229,7 @@ uv run classifiles index                        # build/update the example index
 uv run classifiles index --learn-past           # learn applied files that are not learned yet
 uv run classifiles eval -b examples -b laya     # accuracy on held-out sorted files (file + folder split)
 uv run classifiles eval --decisions             # accuracy against your real Review decisions
+uv run classifiles eval --trained               # experimental: trained classifier vs. neighbour vote
 uv run classifiles scan --limit 100 --only-new
 uv run classifiles list --status needs_review
 uv run classifiles accept --suggested

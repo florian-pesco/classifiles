@@ -17,7 +17,7 @@ from .embedder import Embedder
 from . import llm
 from .duplicates import Catalog, find_duplicates
 from .image_index import ImageEmbedder, ImageIndex, is_image
-from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
+from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text, inbox_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
 from .paths import normalize_subpath, numbered_sibling, suggest_folder_name, suggest_subpath
@@ -160,12 +160,13 @@ class ClassifilesService:
         images = self.image_index() if self.settings.image_similarity else None
 
         def after():  # same background thread, after the text index
+            _quietly(self.fill_applied_query_vectors)
             if catalog:
                 self._catalog.build(cats)
             if images is not None:
                 images.build(cats)
 
-        index.start_build(cats, on_done=after if (catalog or images is not None) else None)
+        index.start_build(cats, on_done=after)
         return self.index_status()
 
     def _image_status(self) -> dict:
@@ -236,8 +237,30 @@ class ClassifilesService:
             if (key, rel) in learned:
                 continue
             out.append((key, rel, doc_text(_learned_folder(key, rel), r["name"], r["kind"],
-                                           r["evidence"].get("text", ""))))
+                                           r["evidence"].get("text", "")),
+                        _inbox_text(r["name"], r["kind"], r["evidence"])))
         return out
+
+    def fill_applied_query_vectors(self) -> int:
+        """Inbox-style vectors for learned examples that were added before they existed, from the
+        stored evidence (no file access). Returns how many were filled."""
+        index = self.example_index()
+        missing = {(r["category_key"], r["relpath"]): r["id"] for r in self.store.query(
+            "SELECT id, category_key, relpath FROM examples WHERE origin = 'applied' AND model = ? "
+            "AND qvector IS NULL", (self.settings.embedding_model,))}
+        if not missing:
+            return 0
+        todo = {}
+        for r in self.store.query("""
+                SELECT m.dst, m.action, m.category_key, p.name, p.kind, p.evidence FROM moves m
+                JOIN proposals p ON p.id = m.proposal_id WHERE m.undone_at IS NULL"""):
+            eid = missing.get(_learned_key(r["dst"], r["action"], r["category_key"]))
+            if eid is not None:
+                todo[eid] = _inbox_text(r["name"], r["kind"], r["evidence"])
+        if todo:
+            ids = list(todo)
+            index.set_query_vectors(list(zip(ids, index.embedder.encode([todo[i] for i in ids], query=True))))
+        return len(todo)
 
     def learn_past_decisions(self) -> dict:
         """Backfill: learn every applied file that was applied without learning (e.g. while another
@@ -245,7 +268,7 @@ class ClassifilesService:
         items = self.unlearned_decisions()
         self.example_index().add(items)
         by = {}
-        for key, _, _ in items:
+        for key, *_ in items:
             kind = "delete" if key == DELETE_KEY else "move/copy"
             by[kind] = by.get(kind, 0) + 1
         return {"learned": len(items), "by_action": by}
@@ -820,7 +843,8 @@ class ClassifilesService:
             key, rel = _learned_key(str(m.dst), m.action, cat_key)
             if p["source"] != "duplicate":  # a duplicate isn't junk by its kind: don't learn it as Delete
                 learned.append((key, rel, doc_text(_learned_folder(key, rel), p["name"], p["kind"],
-                                                   p["evidence"].get("text", ""))))
+                                                   p["evidence"].get("text", "")),
+                                _inbox_text(p["name"], p["kind"], p["evidence"])))
             if m.action != "delete" and key != DELETE_KEY:
                 self._catalog.add(key, rel, m.dst, p.get("content_hash"))
             if m.created_dir:
@@ -929,6 +953,12 @@ def _learned_key(dst: str, action: str, cat_key: str | None = None) -> tuple[str
         except ValueError:
             pass
     return str(p.parent), p.name
+
+
+def _inbox_text(name: str, kind: str, evidence: dict) -> str:
+    """Inbox-style text of a decided file, from its stored evidence."""
+    meta = evidence.get("meta") or {}
+    return inbox_text(name, kind, evidence.get("text", ""), meta.get("looks_like"), meta.get("source"))
 
 
 def _learned_folder(key: str, relpath: str) -> str:
