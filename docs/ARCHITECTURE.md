@@ -254,7 +254,10 @@ Measured only so far; proposals still come from the neighbour vote (4a).
 - **Model:** multinomial logistic regression (scikit-learn, lbfgs) on the 1024-dim inbox-style vectors.
   - Categories are balanced (n / (classes · n_class)), and learned examples count `applied_weight`
     (default 3).
-  - C is chosen from {0.3, 1, 3, 10} by 3-fold CV on balanced accuracy.
+  - C is chosen from {0.3, 1, 3, 10} by 3-fold CV on balanced accuracy; a temperature (calibration)
+    is fitted on cross-validated predictions.
+  - Delete is not trained. Its examples are the only real inbox files, so the model learned "looks
+    like a download → Delete". The blend keeps the neighbour probability for Delete.
   - Training takes under a second on 2 CPU threads.
 - **Evaluation:** `evaluate_trained` runs the file split, the folder split and real decisions, with
   5 folds.
@@ -262,6 +265,7 @@ Measured only so far; proposals still come from the neighbour vote (4a).
     files, plus the test files' folders in the folder split; for decisions, without each file's own
     scanned and learned examples.
   - The neighbour vote hides the same files.
+  - Real decisions skip duplicates: they are decided by being identical to another file, not by content.
   - Compared: neighbours, trained, and blends `P ∝ P_knn^(1−a) · P_trained^a`, a ∈ {0.25, 0.5, 0.75}.
   - A test asserts that no training run contains a test file.
 
