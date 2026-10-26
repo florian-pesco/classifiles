@@ -262,9 +262,9 @@ def test_decision_eval_hides_learned_deletions(ex_service, sorted_tree, monkeypa
     seen = {}
     original = ex_service.example_index().query
 
-    def spy(vec, allowed, exclude_ids=None, k=None):
+    def spy(vec, allowed, exclude_ids=None, k=None, extra=None, base=None):
         seen["excluded"] = set(exclude_ids or ())
-        return original(vec, allowed, exclude_ids, k)
+        return original(vec, allowed, exclude_ids, k, extra=extra)
 
     monkeypatch.setattr(ex_service.example_index(), "query", spy)
     evaluate_decisions(ex_service)

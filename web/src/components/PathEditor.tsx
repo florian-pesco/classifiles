@@ -64,7 +64,7 @@ export function PathEditor({ category, subpath, suggested, newFolder, disabled, 
   )
 }
 
-function PathDialog({ category, start, onCancel, onSave }: {
+export function PathDialog({ category, start, onCancel, onSave }: {
   category: string
   start: string
   onCancel: () => void

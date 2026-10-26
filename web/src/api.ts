@@ -31,7 +31,23 @@ export interface Proposal {
   duplicate_of: string | null
   duplicate_kind: 'sorted' | 'inbox' | null
   duplicate_path: string | null
+  relearned: number // 1: updated from the user's decisions in this scan
 }
+
+/** A suggested group of files to review together (name pattern, similar content, same proposal/doubt). */
+export interface ReviewBatch {
+  id: string
+  kind: 'name' | 'content' | 'proposal' | 'doubt'
+  title: string
+  why: string
+  ids: number[]
+  size: number
+  undecided: number
+  distribution: { where: string; count: number }[]
+  uniform: boolean
+}
+
+export type ReviewAction = 'accept' | 'reject' | 'reset'
 
 export interface Scan {
   id: number
@@ -131,6 +147,7 @@ export interface Settings {
   duplicates_in_sorted: boolean
   llm_model: string
   llm_max_files: number
+  relearn_in_scan: boolean
 }
 
 export interface IndexStatus {
@@ -248,8 +265,12 @@ export const api = {
     call<Scan>('POST', '/api/scans', { inbox, max_files: maxFiles ?? 0, only_new: onlyNew }),
 
   proposals: (scanId: number) => call<Proposal[]>('GET', `/api/proposals?${q({ scan_id: scanId })}`),
-  review: (id: number, action: 'accept' | 'reject' | 'reset', folder?: string, subpath?: string) =>
-    call<Proposal>('PATCH', `/api/proposals/${id}`, { action, folder, subpath }),
+  review: (id: number, action: ReviewAction, folder?: string, subpath?: string) =>
+    call<Proposal & { relearned_others: Proposal[] }>('PATCH', `/api/proposals/${id}`, { action, folder, subpath }),
+  bulkReview: (ids: number[], action: ReviewAction, folder?: string, subpath?: string) =>
+    call<{ updated: Proposal[]; errors: { proposal_id: number; error: string }[]; relearned: Proposal[] }>(
+      'POST', '/api/proposals/bulk', { ids, action, folder, subpath }),
+  reviewBatches: (scanId: number) => call<ReviewBatch[]>('GET', `/api/scans/${scanId}/batches`),
   acceptSuggested: (scanId: number, topLevel = false) =>
     call<{ accepted: number }>('POST', '/api/proposals/accept-suggested', { scan_id: scanId, top_level: topLevel }),
   subfolders: (category: string, path = '') =>

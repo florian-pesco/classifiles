@@ -12,7 +12,7 @@ from typing import Callable
 from .classifier import Classifier
 from .config import ACTIONS, Settings
 from .deciders import Decider, make_decider
-from .deciders.examples import ExampleDecider
+from .deciders.examples import DECIDED, ExampleDecider
 from .embedder import Embedder
 from . import llm
 from .duplicates import Catalog, find_duplicates
@@ -363,6 +363,7 @@ class ClassifilesService:
             "alternatives": c.alternatives, "reason": c.reason, "status": status,
             "final_target": c.target, "neighbours": c.neighbours, "suggested_subpath": subpath,
             "subpath": subpath, "new_folder": new_folder, "updated_at": now(),
+            "qvec": _vec_bytes(c.vector), "ivec": _vec_bytes(c.image_vector),
         })
         candidate = None
         if container and c.vector is not None:
@@ -558,7 +559,7 @@ class ClassifilesService:
         p = self.store.one(PROPOSALS_SQL + " WHERE p.id = ?", (proposal_id,))
         if not p:
             raise KeyError(f"No proposal {proposal_id}")
-        return p
+        return _without_vectors(p)
 
     def proposals(self, scan_id: int | None = None, status: str | None = None) -> list[dict]:
         scan_id = scan_id or self.latest_scan_id()
@@ -566,7 +567,7 @@ class ClassifilesService:
         if status:
             sql += " AND p.status = ?"
             params.append(status)
-        return self.store.query(sql + " ORDER BY p.confidence DESC, p.name", tuple(params))
+        return [_without_vectors(p) for p in self.store.query(sql + " ORDER BY p.confidence DESC, p.name", tuple(params))]
 
     def current_path(self, proposal_id: int) -> Path:
         """Where the proposal's file is now: its applied destination, else its original path."""
@@ -609,6 +610,101 @@ class ClassifilesService:
                       "subpath": p["suggested_subpath"] or ""}
         self.store.update("proposals", proposal_id, {**values, "updated_at": now()})
         return self.get_proposal(proposal_id)
+
+    def bulk_review(self, ids: list[int], action: str, folder: str | None = None,
+                    subpath: str | None = None) -> dict:
+        """Apply one review action to several proposals. Returns {"updated": [...], "errors": [...]}."""
+        updated, errors = [], []
+        for pid in ids:
+            try:
+                updated.append(self.review(pid, action, folder, subpath))
+            except (KeyError, ValueError) as e:
+                errors.append({"proposal_id": pid, "error": str(e.args[0] if e.args else e)})
+        return {"updated": updated, "errors": errors}
+
+    def suggest_batches(self, scan_id: int | None = None) -> list[dict]:
+        """Suggested batches of files to review together (batches.py)."""
+        from .batches import find_batches
+
+        scan_id = scan_id or self.latest_scan_id()
+        if not scan_id:
+            return []
+        rows = self.store.query(PROPOSALS_SQL + " WHERE p.scan_id = ?", (scan_id,))
+        vectors = {r["id"]: _vec(r["qvec"]) for r in rows if r["qvec"] is not None}
+        return find_batches([_without_vectors(r) for r in rows], vectors, self.get_scan(scan_id)["threshold"])
+
+    def relearn(self, scan_id: int) -> list[dict]:
+        """Learn from the decisions made so far in this scan, right away.
+
+        Every accepted (or applied) file of the scan becomes a temporary example of the category and
+        folder the user chose, using the vectors stored at scan time. All still-undecided proposals of
+        the example model are then re-scored against the stored index plus these examples. It is
+        computed from scratch each time, so taking a decision back also takes its effect back.
+        Nothing is read from disk and no model runs. Rules, duplicates and decided files are never
+        touched. Returns the proposals whose category, folder or confidence changed."""
+        if not self.settings.relearn_in_scan or self.settings.backend != "examples":
+            return []
+        rows = self.store.query("SELECT * FROM proposals WHERE scan_id = ?", (scan_id,))
+        cats = self.categories()
+        key_of = {c.name: category_key(c) for c in cats}
+        decided = [r for r in rows if r["status"] in ("accepted", "moved") and r["source"] not in ("rule", "duplicate")
+                   and r["final_target"] in key_of and r["qvec"] is not None]
+        extra = [(key_of[r["final_target"]], f"{DECIDED}{r['name']}/{r['subpath'] or ''}", _vec(r["qvec"]))
+                 for r in decided]
+        image_extra = [(key_of[r["final_target"]], f"{DECIDED}{r['name']}/{r['subpath'] or ''}", _vec(r["ivec"]))
+                       for r in decided if r["ivec"] is not None]
+        todo = [r for r in rows if r["status"] in ("suggested", "needs_review") and r["source"] == "examples"
+                and r["qvec"] is not None]
+        if not todo:
+            return []
+        decider = self.decider()
+        if not isinstance(decider, ExampleDecider):
+            return []
+        model_cats = [c for c in cats if c.usable and c.suggest]
+        threshold = self.get_scan(scan_id)["threshold"]
+        bases = self._stored_candidates(scan_id, decider, model_cats, todo)
+        changed = []
+        for r in todo:
+            qv, iv = _vec(r["qvec"]), _vec(r["ivec"])
+            probs, reason, nbs = decider.score(qv, iv, model_cats, extra=extra, image_extra=image_extra,
+                                               base=bases[r["id"]])
+            if not probs:
+                continue
+            ranked = sorted(probs.items(), key=lambda kv: kv[1], reverse=True)
+            target, conf = ranked[0][0], round(ranked[0][1], 4)
+            # the model's own answer, without the user's decisions
+            base = decider.score(qv, iv, model_cats, base=bases[r["id"]])[0] if extra else probs
+            base_target = max(base, key=base.get) if base else None
+            relearned = int(bool(extra) and (base_target != target or abs(base.get(target, 0) - conf) > 0.05))
+            if target == r["target"] and abs(conf - r["confidence"]) < 0.005 and relearned == r["relearned"]:
+                continue
+            subpath, new_folder, _ = self._folder_for(target, nbs, r["name"])
+            self.store.update("proposals", r["id"], {
+                "target": target, "final_target": target, "confidence": conf,
+                "alternatives": [{"folder": f, "probability": round(q, 4)} for f, q in ranked[:4]],
+                "status": "suggested" if conf >= threshold else "needs_review",
+                "reason": reason, "neighbours": nbs, "suggested_subpath": subpath, "subpath": subpath,
+                "new_folder": new_folder, "relearned": relearned, "updated_at": now(),
+            })
+            changed.append(self.get_proposal(r["id"]))
+        return changed
+
+    def _stored_candidates(self, scan_id: int, decider: ExampleDecider, categories: list, todo: list[dict]) -> dict:
+        """Nearest stored examples per proposal, searched once (in one batch) and kept while the
+        index and categories stay the same: later decisions then only compare against the
+        decided files, which is quick even for big scans."""
+        sig = (scan_id, self.settings.embedding_model, decider.index.size,
+               decider.image_index.size if decider.image_index is not None else 0,
+               tuple(sorted(category_key(c) for c in categories)))
+        cache = self._relearn_cache if getattr(self, "_relearn_cache", (None,))[0] == sig else (sig, {})
+        missing = [r for r in todo if r["id"] not in cache[1]]
+        if missing:
+            found = decider.candidates([_vec(r["qvec"]) for r in missing],
+                                       [_vec(r["ivec"]) for r in missing],
+                                       categories)
+            cache[1].update({r["id"]: c for r, c in zip(missing, found)})
+        self._relearn_cache = cache
+        return cache[1]
 
     def accept_suggested(self, scan_id: int | None = None, top_level: bool = False) -> int:
         """Accept every proposal at or above the threshold, into its suggested folder (or, with
@@ -841,6 +937,25 @@ def _learned_folder(key: str, relpath: str) -> str:
         return "Delete"
     sub = os.path.dirname(relpath)
     return f"{Path(key).name}/{sub}" if sub else Path(key).name
+
+
+def _vec_bytes(v) -> bytes | None:
+    import numpy as np
+
+    return None if v is None else np.asarray(v, dtype=np.float16).tobytes()
+
+
+def _vec(b):
+    import numpy as np
+
+    return None if b is None else np.frombuffer(b, dtype=np.float16).astype(np.float32)
+
+
+def _without_vectors(p: dict) -> dict:
+    """Proposals as handed to callers (UI/API): the stored vectors are internal binary data."""
+    p.pop("qvec", None)
+    p.pop("ivec", None)
+    return p
 
 
 def _quietly(fn, *args) -> None:

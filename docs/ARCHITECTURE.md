@@ -236,6 +236,37 @@ for each category folder:                                 query text = file name
   On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
   pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
 
+### 4g. Batches and learning from decisions (`batches.py`, `service.relearn`)
+
+- **Stored vectors.** Each example-model proposal keeps the vectors computed during the scan
+  (`proposals.qvec` text, `proposals.ivec` picture, float16). Everything below works on these, so it
+  needs no file access and no model.
+- **Batch suggestions** (`find_batches`, `GET /api/scans/{id}/batches`), over the scan's proposals
+  without duplicates and applied files:
+  - *name*: `name_pattern()` replaces long hex IDs → `<id>`, dates → `<date>`, other numbers → `<n>`
+    (case and extension normalised); ≥ 3 files with the same pattern;
+  - *content*: greedy clusters of text vectors with cosine ≥ 0.9 (the file with the most close
+    neighbours takes them, repeat); skipped when ≥ 80% is already a name batch; up to 3000 files;
+  - *proposal*: undecided, ≥ threshold, same category + subfolder;
+  - *doubt*: undecided, below threshold, same top-two category pair.
+
+  A file can be in several batches. Ranked by undecided files (proposal batches weigh less, as
+  *Accept all suggested* covers them); fully decided batches are dropped; at most 40.
+- **Learn from my decisions** (`relearn(scan_id)`, run by the API after every review / bulk call
+  when `relearn_in_scan` is on):
+  1. every accepted (or applied) file of the scan, except rule hits and duplicates, becomes a
+     temporary example `("<category key>", "@decided:<name>/<subpath>", vector)`;
+  2. every undecided example-model proposal is re-scored: its nearest stored examples plus the
+     temporary ones vote as usual (`vote()`, `ExampleDecider.score(extra=…)`), pictures blended as in 4f;
+  3. category, confidence, status, alternatives, reason and subfolder (the decided files vote for
+     their folder too) are updated; `relearned = 1` if the result differs from the model alone.
+
+  It is recomputed from scratch each time, so a reset decision stops counting. Decided files, rule
+  hits and duplicates are never changed. The nearest *stored* examples per proposal are searched once
+  in one matrix product and cached while index and categories are unchanged, so a decision costs
+  ≈ 0.06 s for 600 undecided files against 10k examples (first one ≈ 0.16 s). Permanent learning
+  still happens only on Apply (4a).
+
 ### 4e. Duplicates (`duplicates.py`)
 
 - **Exact only:** byte-for-byte identical content. Candidates narrow in three steps: same size →
@@ -365,7 +396,7 @@ One SQLite file, four tables:
 | Table | One row per | Key columns |
 |---|---|---|
 | `scans` | scan run | inbox, target_root (the roots at scan time), backend, threshold, max_files, only_new, status (running/done/failed), processed/total, inbox_total |
-| `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder |
+| `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder, qvec/ivec (stored vectors), relearned |
 | `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), category_key, created_dir, moved_at, undone_at, purged_at (trash emptied) |
 | `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16) |
 
@@ -398,6 +429,7 @@ src/classifiles/
   mover.py             plan_move / execute / revert / purge: move, copy, trash (safety checks)
   embedder.py          local embedding model with resource caps (lazy, offline after download)
   examples.py          example index: sample folders, build/update, kNN query, learn/forget
+  batches.py           batch suggestions for Review (name pattern, similar content, same proposal/doubt)
   evaluate.py          hold-out evaluation (`classifiles eval`)
 src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
 src/classifiles_cli/main.py  `classifiles` command (typer)
@@ -445,7 +477,10 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | POST | `/scans` `{inbox?, max_files?, only_new?}` | start a scan in a background thread; returns the scan row. `max_files`: omitted/null = settings default, 0 = all |
 | GET | `/scans`, `/scans/{id}` | list scans / progress of one |
 | GET | `/proposals?scan_id=&status=` | proposals (default: latest scan) |
-| PATCH | `/proposals/{id}` `{action, folder?}` | accept / reject / reset |
+| PATCH | `/proposals/{id}` `{action, folder?, subpath?}` | accept / reject / reset; `relearned_others`: proposals updated from this decision |
+| POST | `/proposals/bulk` `{ids, action, folder?, subpath?}` | the same for several; returns `updated`, `errors`, `relearned` |
+| GET | `/scans/{id}/batches` | suggested batches to review together |
+| POST | `/scans/{id}/relearn` | re-score the undecided proposals from the decisions (normally automatic) |
 | POST | `/proposals/accept-suggested` `{scan_id}` | accept everything ≥ threshold |
 | POST | `/apply/plan` `{scan_id}` | dry run |
 | POST | `/apply` `{scan_id}` | move accepted files |

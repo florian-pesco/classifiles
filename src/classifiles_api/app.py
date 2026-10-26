@@ -30,6 +30,13 @@ class ReviewRequest(BaseModel):
     subpath: str | None = None  # folder inside the category; "" = top level; None = keep/suggest
 
 
+class BulkReviewRequest(BaseModel):
+    ids: list[int]
+    action: str  # accept | reject | reset
+    folder: str | None = None
+    subpath: str | None = None
+
+
 class SettingsPatch(BaseModel):
     inboxes: list[str] | None = None
     threshold: float | None = None
@@ -52,6 +59,7 @@ class SettingsPatch(BaseModel):
     duplicates_in_sorted: bool | None = None
     llm_model: str | None = None
     llm_max_files: int | None = None
+    relearn_in_scan: bool | None = None
 
 
 class CategoriesUpdate(BaseModel):
@@ -247,7 +255,29 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
 
     @app.patch("/api/proposals/{proposal_id}")
     def review(proposal_id: int, req: ReviewRequest):
-        return guard(svc.review, proposal_id, req.action, req.folder, req.subpath)
+        """The reviewed proposal, plus `relearned_others`: other proposals of the scan that changed
+        because of this decision (learn from my decisions)."""
+        p = guard(svc.review, proposal_id, req.action, req.folder, req.subpath)
+        return {**p, "relearned_others": _strip(svc.relearn(p["scan_id"]))}
+
+    @app.post("/api/proposals/bulk")
+    def bulk_review(req: BulkReviewRequest):
+        if req.action not in ("accept", "reject", "reset"):
+            raise HTTPException(400, "action must be accept, reject or reset")
+        out = svc.bulk_review(req.ids, req.action, req.folder, req.subpath)
+        scans = {p["scan_id"] for p in out["updated"]}
+        out["relearned"] = _strip([c for s in scans for c in svc.relearn(s)])
+        _strip(out["updated"])
+        return out
+
+    @app.post("/api/scans/{scan_id}/relearn")
+    def relearn(scan_id: int):
+        return {"relearned": _strip(guard(svc.relearn, scan_id))}
+
+    @app.get("/api/scans/{scan_id}/batches")
+    def scan_batches(scan_id: int):
+        guard(svc.get_scan, scan_id)
+        return svc.suggest_batches(scan_id)
 
     @app.post("/api/proposals/accept-suggested")
     def accept_suggested(req: AcceptSuggestedRequest):
@@ -337,6 +367,13 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
             return FileResponse(WEB_DIST / "index.html", headers={"Cache-Control": "no-cache"})
 
     return app
+
+
+def _strip(rows: list[dict]) -> list[dict]:
+    """Proposals as sent to the browser: without the absolute path inside the evidence."""
+    for r in rows:
+        r.get("evidence", {}).pop("path", None)
+    return rows
 
 
 def _prune(roots: list[dict], entries: list[dict]) -> list[dict]:

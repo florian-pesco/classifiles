@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS proposals (
     duplicate_kind TEXT,                -- sorted | inbox
     duplicate_path TEXT,                -- absolute path of that identical file
     content_hash TEXT,                  -- full hash, if the file was hashed
+    qvec BLOB,                          -- text query vector (float16), for re-scoring without re-reading
+    ivec BLOB,                          -- picture vector (float16), pictures only
+    relearned INTEGER NOT NULL DEFAULT 0, -- 1: proposal was updated from the user's decisions in this scan
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
@@ -133,6 +136,9 @@ MIGRATIONS = [
     ("proposals", "duplicate_kind", "TEXT"),
     ("proposals", "duplicate_path", "TEXT"),
     ("proposals", "content_hash", "TEXT"),
+    ("proposals", "qvec", "BLOB"),
+    ("proposals", "ivec", "BLOB"),
+    ("proposals", "relearned", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
 JSON_FIELDS = ("evidence", "alternatives", "neighbours")
