@@ -165,3 +165,108 @@ def test_temperature_scaling_divides_the_scores():
     sharp = m.predict_proba(X).max(axis=1).mean()
     m.temperature = 0.5
     assert m.predict_proba(X).max(axis=1).mean() > sharp  # lower temperature: more confident
+
+
+# --- phase 2: the trained model in use ---------------------------------------------------
+
+@pytest.fixture
+def trained_service(ex_service, sorted_tree):
+    """Enough sorted files per category (≥ 6) to train, and the trained model switched on."""
+    more = {"Finance": ["invoice_mar", "invoice_apr", "bank_fees", "tax_notice"],
+            "Work": ["meeting_minutes", "project_plan", "weekly_report", "meeting_notes_friday"],
+            "Photos": ["holiday_lake", "camera_portrait", "holiday_city", "photo_family"],
+            "Software": ["setup_editor", "installer_driver", "setup_player", "driver_update"]}
+    for cat, names in more.items():
+        for n in names:
+            (sorted_tree["root"] / cat / "2025" / f"{n}.txt").write_text(n.replace("_", " "))
+    ex_service.settings.trained_weight = 0.5
+    ex_service.retrain_delay = 0
+    ex_service.example_index().build(ex_service.categories(refresh=True))
+    return ex_service
+
+
+def test_retrain_stores_and_uses_the_model(trained_service):
+    assert trained_service.trained_model() is None
+    assert trained_service.retrain()["state"] == "done"
+    m = trained_service.trained_model()
+    assert m is not None and "__delete__" not in m.keys and len(m.keys) == 4
+    trained_service._trained = None  # reload from the database
+    again = trained_service.trained_model()
+    assert np.allclose(again.coef, m.coef) and again.temperature == m.temperature and again.n_train == m.n_train
+    st = trained_service.trained_status()
+    assert st["trained"] and st["examples"] == sum(m.n_train.values()) and st["weight"] == 0.5
+
+    _, rows = trained_service.scan(trained_service.settings.inboxes[0])
+    r = next(r for r in rows if r["name"] == "invoice_march.txt")
+    assert r["target"] == "Finance" and r["reason"].startswith("trained model: Finance")
+    assert "similar to:" in r["reason"] and r["subpath"] == "2025"  # folders still come from similar files
+
+
+def test_weight_zero_means_similar_files_only(trained_service):
+    trained_service.retrain()
+    trained_service.settings.trained_weight = 0.0
+    trained_service.reset_decider()
+    assert trained_service.decider().trained is None
+    _, rows = trained_service.scan(trained_service.settings.inboxes[0])
+    assert not any(r["reason"].startswith("trained model") for r in rows)
+
+
+def test_first_use_trains_once_in_the_background(trained_service):
+    trained_service.reset_decider()
+    trained_service.decider()
+    trained_service._train_timer.join(30)
+    assert trained_service.trained_model() is not None
+    assert trained_service.decider().trained is not None  # the decider was rebuilt with the model
+
+
+def test_apply_and_undo_retrain(trained_service, monkeypatch):
+    monkeypatch.setattr(trained_service, "_learn", lambda items: trained_service.example_index().add(items))
+    trained_service.retrain()
+    before = trained_service.trained_model().n_train
+    scan_id, rows = trained_service.scan(trained_service.settings.inboxes[0])
+    r = next(r for r in rows if r["name"] == "invoice_march.txt")
+    trained_service.review(r["id"], "accept", "Finance", subpath="")
+    trained_service.apply(scan_id)
+    trained_service._train_timer.join(30)
+    key = next(k for k in before if k.endswith("Finance"))
+    assert trained_service.trained_model().n_train[key] == before[key] + 1  # the applied file was learned
+    trained_service.undo()
+    trained_service._train_timer.join(30)
+    assert trained_service.trained_model().n_train[key] == before[key]
+
+
+def test_decider_blend_fills_categories_without_neighbours():
+    from classifiles.deciders.examples import ExampleDecider
+
+    class Index:
+        size = 1
+
+        def query(self, vec, allowed, exclude_ids=None, extra=None, base=None):
+            return {"a": 1.0}, []  # only "a" got neighbour votes
+
+    class Cat:
+        def __init__(self, name):
+            self.name, self.path = name, f"/x/{name}"
+
+    class Model:
+        def probs(self, vec):
+            return {"/x/a": 0.1, "/x/b": 0.9}
+
+    d = ExampleDecider(Index(), trained=Model(), trained_weight=0.5)
+    probs, reason, _ = d.score(np.ones(2), None, [Cat("a"), Cat("b")])
+    assert set(probs) == {"a", "b"} and probs["b"] > 0 and reason.startswith("trained model: b 90%")
+
+
+def test_api_weight_retrain_and_quality(trained_service, tmp_path):
+    from fastapi.testclient import TestClient
+
+    from classifiles_api.app import create_app
+
+    client = TestClient(create_app(trained_service, config_path=str(tmp_path / "cfg.yaml")))
+    assert client.patch("/api/settings", json={"trained_weight": 1.5}).status_code == 400
+    assert client.patch("/api/settings", json={"trained_weight": 0.25}).json()["trained_weight"] == 0.25
+    client.post("/api/index/retrain")
+    trained_service._train_timer.join(30)
+    assert client.get("/api/index").json()["trained"]["trained"]
+    q = client.get("/api/quality?rerun=true").json()
+    assert q["decisions"] == 0 and "mix" not in q  # no decisions yet: nothing to compare

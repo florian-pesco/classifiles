@@ -32,6 +32,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [relearn, setRelearn] = useState(settings.relearn_in_scan)
   const [images, setImages] = useState(settings.image_similarity)
   const [imageWeight, setImageWeight] = useState(settings.image_weight)
+  const [trainedWeight, setTrainedWeight] = useState(settings.trained_weight)
   const [imagesPer, setImagesPer] = useState(settings.images_per_category)
   const [dupes, setDupes] = useState(settings.detect_duplicates)
   const [dupesSorted, setDupesSorted] = useState(settings.duplicates_in_sorted)
@@ -58,6 +59,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         relearn_in_scan: relearn,
         image_similarity: images,
         image_weight: imageWeight,
+        trained_weight: trainedWeight,
         images_per_category: imagesPer,
         detect_duplicates: dupes,
         duplicates_in_sorted: dupesSorted,
@@ -100,6 +102,20 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
             {MODELS.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         </label>
+        {model.startsWith('examples') && (
+          <label className="field">
+            <span>
+              Trained model share: <b>{Math.round(trainedWeight * 100)}%</b>
+              {trainedWeight === 0 ? ' (similar files only)' : ' (rest: the most similar sorted files)'}
+            </span>
+            <input type="range" min={0} max={1} step={0.25} value={trainedWeight}
+                   onChange={e => setTrainedWeight(Number(e.target.value))} aria-label="Trained model share" />
+            <span className="small muted">
+              The trained model learns from all your sorted files at once what sets each folder apart, which helps most
+              with new topics. The similar files still choose the subfolder. Delete is decided by similar files and rules only.
+            </span>
+          </label>
+        )}
         <label className="field">
           <span>Sample file names shown to the model for folders without a description</span>
           <input type="number" min={0} max={10} value={samples} onChange={e => setSamples(Number(e.target.value))} />

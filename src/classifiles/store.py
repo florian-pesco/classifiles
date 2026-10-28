@@ -98,6 +98,19 @@ CREATE TABLE IF NOT EXISTS catalog (
 );
 CREATE INDEX IF NOT EXISTS catalog_size ON catalog(size);
 -- Already-sorted files used as examples by the example-based classifier (see examples.py).
+-- Trained classifier (trained.py): the latest model per embedding model.
+CREATE TABLE IF NOT EXISTS classifiers (
+    id INTEGER PRIMARY KEY,
+    model TEXT NOT NULL,                  -- embedding model the vectors come from
+    created_at TEXT NOT NULL,
+    keys TEXT NOT NULL,                   -- JSON: category keys, one row of coef each
+    dims INTEGER NOT NULL,
+    coef BLOB NOT NULL,                   -- float32 (categories × dims)
+    intercept BLOB NOT NULL,              -- float32 (categories)
+    c REAL NOT NULL,
+    temperature REAL NOT NULL,
+    n_train TEXT NOT NULL                 -- JSON: examples per category key
+);
 CREATE TABLE IF NOT EXISTS examples (
     id INTEGER PRIMARY KEY,
     category_key TEXT NOT NULL,           -- category folder path, or '__delete__'

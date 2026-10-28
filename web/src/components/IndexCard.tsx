@@ -38,6 +38,15 @@ export function IndexCard({ active, notify, fail }: {
     } catch (e) { fail(e) } finally { setLearning(false) }
   }
 
+  const retrain = async () => {
+    try {
+      await api.retrain()
+      notify('Training the classifier (a few seconds)…')
+      setTimeout(load, 4000)
+      setTimeout(load, 15000)
+    } catch (e) { fail(e) }
+  }
+
   if (!st) return null
   const s = st.status
   return (
@@ -83,6 +92,17 @@ export function IndexCard({ active, notify, fail }: {
               ? `${st.images.total.toLocaleString()} sorted pictures are compared with inbox pictures by what they look like.`
               : 'not indexed yet. Update the index to compare inbox pictures with your sorted pictures.'}
           {st.images.state === 'failed' && <span className="warn-text"> Failed: {st.images.error}</span>}
+        </p>
+      )}
+      {active && st.trained && st.trained.weight > 0 && (
+        <p className="small muted">
+          Trained model: {st.trained.state === 'running'
+            ? 'training…'
+            : st.trained.trained
+              ? `trained on ${st.trained.examples.toLocaleString()} files${st.trained.trained_at ? ` (${shortDate(st.trained.trained_at)})` : ''}, mixed in at ${Math.round(st.trained.weight * 100)}%. Retrains by itself after updates and applies.`
+              : st.trained.message ?? 'not trained yet. Update the index first.'}
+          {st.trained.state === 'failed' && <span className="warn-text"> Failed: {st.trained.error}</span>}
+          {' '}<button className="linkish" onClick={retrain} disabled={running || st.trained.state === 'running'}>retrain now</button>
         </p>
       )}
       {st.catalog?.enabled && (

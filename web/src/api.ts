@@ -105,6 +105,7 @@ export interface Quality {
   decided_via: Record<string, number>
   recorded: Record<string, QualitySummary>
   current?: QualitySummary
+  mix?: { weight: number; neighbours: QualitySummary; mixed: QualitySummary }
 }
 
 /** One category's stored settings, as sent back to the server. */
@@ -148,6 +149,7 @@ export interface Settings {
   llm_model: string
   llm_max_files: number
   relearn_in_scan: boolean
+  trained_weight: number
 }
 
 export interface IndexStatus {
@@ -171,6 +173,8 @@ export interface IndexStatus {
   catalog: { state: string; message?: string; files: number; enabled: boolean; done?: number; error?: string }
   images: { enabled: boolean; state?: string; message?: string; total?: number; done?: number; error?: string;
             per_category?: Record<string, number> }
+  trained: { state: string; message?: string; error?: string; weight: number; trained: boolean;
+             trained_at: string | null; examples: number; categories: string[] }
 }
 
 export interface PlannedMove {
@@ -254,6 +258,7 @@ export const api = {
   index: () => call<IndexStatus>('GET', '/api/index'),
   buildIndex: () => call<IndexStatus>('POST', '/api/index/build'),
   cancelIndex: () => call<IndexStatus>('POST', '/api/index/cancel'),
+  retrain: () => call<IndexStatus['trained']>('POST', '/api/index/retrain'),
   learnPast: () => call<{ learned: number; by_action: Record<string, number> }>('POST', '/api/index/learn-past'),
 
   browse: (path?: string) => call<FsListing>('GET', `/api/fs?${q({ path })}`),

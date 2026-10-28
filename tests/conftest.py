@@ -62,6 +62,7 @@ def settings(tree) -> Settings:
         rules=[{"kind": "installer", "folder": "Software"}],
         db_path=":memory:",
         image_similarity=False,  # tests that need it use a fake image model
+        trained_weight=0.0,  # tests that need the trained classifier switch it on
     )
 
 

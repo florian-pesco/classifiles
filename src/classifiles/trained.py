@@ -134,11 +134,42 @@ def training_set(rows: list[dict], exclude_ids: set[int] | None = None, applied_
     return X, y, w
 
 
+def train(rows: list[dict], applied_weight: float = 3.0, threads: int = 2, seed: int = 0) -> TrainedModel | None:
+    """Fit the production model on example rows: C by cross-validation, then calibration. None if
+    there is too little to train on (fewer than two categories or very few examples)."""
+    X, y, w = training_set(rows, applied_weight=applied_weight)
+    counts = Counter(y)
+    if len(counts) < 2 or min(counts.values()) < 3:
+        return None
+    C, _ = choose_C(X, y, w, threads=threads, seed=seed)
+    T = fit_temperature(X, y, w, C, threads=threads, seed=seed)
+    m = fit(X, y, w, C, threads)
+    m.temperature = T
+    return m
+
+
+def to_row(m: TrainedModel, embedding_model: str, created_at: str) -> dict:
+    import json
+
+    return {"model": embedding_model, "created_at": created_at, "keys": json.dumps(m.keys), "dims": m.coef.shape[1],
+            "coef": m.coef.astype(np.float32).tobytes(), "intercept": m.intercept.astype(np.float32).tobytes(),
+            "c": m.C, "temperature": m.temperature, "n_train": json.dumps(m.n_train)}
+
+
+def from_row(r: dict) -> TrainedModel:
+    import json
+
+    keys = json.loads(r["keys"])
+    coef = np.frombuffer(r["coef"], dtype=np.float32).reshape(len(keys), r["dims"])
+    return TrainedModel(keys, coef, np.frombuffer(r["intercept"], dtype=np.float32), r["c"],
+                        json.loads(r["n_train"]), r["temperature"])
+
+
 def blend(p_knn: dict[str, float], p_trained: dict[str, float], a: float, eps: float = 1e-4) -> dict[str, float]:
     """P ∝ P_knn^(1−a) · P_trained^a (same scheme as pictures) over the categories the trained model
     knows. Categories it doesn't know (Delete) keep the neighbour vote's probability, and the known
     ones share the rest."""
-    known = [k for k in p_knn if k in p_trained] or list(p_trained)
+    known = list(p_trained)
     rest = {k: v for k, v in p_knn.items() if k not in p_trained}
     mass = 1.0 - sum(rest.values()) if p_knn else 1.0
     raw = {k: max(p_knn.get(k, 0.0), eps) ** (1 - a) * max(p_trained.get(k, 0.0), eps) ** a for k in known}

@@ -168,6 +168,11 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
             current.append({"true": r["final_target"], "pred": c.target, "confidence": c.confidence,
                             "top3": [a["folder"] for a in c.alternatives[:3]], "via": r["decided_via"] or "unknown"})
         out["current"] = summarize(current, by_via=True)
+        w = service.settings.trained_weight
+        if w > 0 and service.settings.backend == "examples":
+            # the trained mix, measured honestly (5 folds; each file hidden from training)
+            res = evaluate_trained(service, splits=(), decisions=True, blends=(w,))["decisions"]["results"]
+            out["mix"] = {"weight": w, "neighbours": res["neighbours"], "mixed": res[f"blend {w}"]}
     return out
 
 
@@ -430,6 +435,7 @@ def _decision_cases(service) -> list[dict]:
 
 def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tuple[str, ...] = SPLITS,
                      decisions: bool = True, folds: int = 5, applied_weight: float = 3.0,
+                     blends: tuple[float, ...] = BLENDS,
                      progress: Callable[[str, int, int], None] | None = None) -> dict:
     """Compare the nearest-neighbour vote, the trained classifier and blends of both.
 
@@ -461,7 +467,7 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
         order = list(range(len(cases)))
         rng.shuffle(order)
         fold_of = {i: n % folds for n, i in enumerate(order)}
-        out = {"neighbours": [], "trained": [], **{f"blend {a}": [] for a in BLENDS}}
+        out = {"neighbours": [], "trained": [], **{f"blend {a}": [] for a in blends}}
         C = T = None
         for f in range(folds):
             test = [i for i in range(len(cases)) if fold_of[i] == f]
@@ -480,7 +486,7 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
                 p_knn, _, extras = decider.classify_evidence(case["ev"], cats, exclude_ids=knn_exclude(case))
                 p_tr = {by_key[k]: p for k, p in model.probs(extras["vector"]).items() if k in by_key}
                 variants = {"neighbours": p_knn, "trained": p_tr,
-                            **{f"blend {a}": tr.blend(p_knn, p_tr, a) for a in BLENDS}}
+                            **{f"blend {a}": tr.blend(p_knn, p_tr, a) for a in blends}}
                 for name, p in variants.items():
                     ranked = sorted(p.items(), key=lambda kv: kv[1], reverse=True)
                     out[name].append({"true": case["true"], "pred": ranked[0][0], "confidence": ranked[0][1],

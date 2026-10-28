@@ -60,6 +60,7 @@ class SettingsPatch(BaseModel):
     llm_model: str | None = None
     llm_max_files: int | None = None
     relearn_in_scan: bool | None = None
+    trained_weight: float | None = None
 
 
 class CategoriesUpdate(BaseModel):
@@ -113,7 +114,9 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
             raise HTTPException(400, "ocr_pdf_pages must be between 0 and 5")
         if "image_weight" in values and not 0 <= values["image_weight"] <= 1:
             raise HTTPException(400, "image_weight must be between 0 and 1")
-        if {"image_similarity", "image_weight"} & set(values):
+        if "trained_weight" in values and not 0 <= values["trained_weight"] <= 1:
+            raise HTTPException(400, "trained_weight must be between 0 and 1")
+        if {"image_similarity", "image_weight", "trained_weight"} & set(values):
             svc.reset_decider()
         if "llm_max_files" in values and not 1 <= values["llm_max_files"] <= 1000:
             raise HTTPException(400, "llm_max_files must be between 1 and 1000")
@@ -172,6 +175,12 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     @app.post("/api/index/learn-past")
     def index_learn_past():
         return guard(svc.learn_past_decisions)
+
+    @app.post("/api/index/retrain")
+    def index_retrain():
+        """Train the classifier again now (background, a few seconds)."""
+        svc.schedule_retrain(0)
+        return svc.trained_status()
 
     @app.post("/api/index/cancel")
     def index_cancel():

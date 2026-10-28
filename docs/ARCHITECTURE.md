@@ -236,9 +236,9 @@ for each category folder:                                 query text = file name
   On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
   pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
 
-### 4h. Trained classifier (experimental, `trained.py`, `classifiles eval --trained`)
+### 4h. Trained classifier (`trained.py`, `classifiles eval --trained`)
 
-Measured only so far; proposals still come from the neighbour vote (4a).
+Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
 
 - **Why:** the neighbour vote asks the 20 nearest examples. A trained model learns from all examples
   at once what separates the categories, which may generalise better to new topics (folder split).
@@ -268,6 +268,23 @@ Measured only so far; proposals still come from the neighbour vote (4a).
   - Real decisions skip duplicates: they are decided by being identical to another file, not by content.
   - Compared: neighbours, trained, and blends `P ∝ P_knn^(1−a) · P_trained^a`, a ∈ {0.25, 0.5, 0.75}.
   - A test asserts that no training run contains a test file.
+- **In use:**
+  - `ExampleDecider.score` blends the text neighbour vote with the trained probabilities
+    (`P ∝ P_knn^(1−w) · P_trained^w`, Delete keeps the neighbour probability); pictures are blended
+    on top as before.
+  - Subfolders, "learn from my decisions" and the reasons still come from the neighbours; the reason
+    starts with "trained model: X 82%".
+  - The model is stored in table `classifiers` (one per embedding model).
+  - `service.retrain()` runs in the index thread after **Update index**, debounced 30 s after apply
+    or undo, once on first use if none exists, and on request (`POST /api/index/retrain`). It
+    takes seconds on 2 threads at nice 10. With the drive unmounted there are no categories, so it
+    keeps the old model.
+  - The Quality card's re-check adds "similar files only" vs. "with the trained model", measured
+    with 5 folds, each file hidden from training.
+- **Measured on real data** (aggregates):
+  - new topics (folder split) 70% → 76% right, wrong suggestions at 0.7 down from 13% to 8% of files;
+  - real decisions 83% → 81% (within noise);
+  - single held-out files 78% → 85%.
 
 ### 4g. Batches and learning from decisions (`batches.py`, `service.relearn`)
 
@@ -508,6 +525,7 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | GET / POST | `/trash`, `/trash/empty` | trash contents / delete permanently |
 | GET | `/index` | example index: build status, example counts per category |
 | POST | `/index/build`, `/index/cancel` | start (background) / cancel an index build |
+| POST | `/index/retrain` | train the classifier again now (background) |
 | POST | `/scans` `{inbox?, max_files?, only_new?}` | start a scan in a background thread; returns the scan row. `max_files`: omitted/null = settings default, 0 = all |
 | GET | `/scans`, `/scans/{id}` | list scans / progress of one |
 | GET | `/proposals?scan_id=&status=` | proposals (default: latest scan) |
