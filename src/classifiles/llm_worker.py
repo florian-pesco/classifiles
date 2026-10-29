@@ -17,6 +17,7 @@ then loaded offline.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -45,7 +46,7 @@ def _load(model_name: str, gpu_fraction: float, threads: int):
         tok = AutoTokenizer.from_pretrained(model_name)
         model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
     os.environ["HF_HUB_OFFLINE"] = "1"
-    model.to(device).eval()
+    model.to(device).eval()  # type: ignore[arg-type]  # transformers' stubs type .to() too narrowly
     return tok, model, device
 
 
@@ -89,14 +90,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--gpu-fraction", type=float, default=0.7)
     ap.add_argument("--threads", type=int, default=2)
     args = ap.parse_args(argv)
-    try:
+    with contextlib.suppress(OSError):
         os.nice(10)
-    except OSError:
-        pass
     out = sys.stdout
     try:
         tok, model, device = _load(args.model, args.gpu_fraction, args.threads)
-    except Exception as e:  # noqa: BLE001 - reported to the parent
+    except Exception as e:
         out.write(json.dumps({"ready": False, "error": str(e)[:500]}) + "\n")
         out.flush()
         return
@@ -118,7 +117,7 @@ def main(argv: list[str] | None = None) -> None:
                 res = {"id": req.get("id"), "probs": choose(tok, model, device, req["prompt"], req["options"])}
             else:
                 res = {"id": req.get("id"), "error": f"unknown task {req.get('task')!r}"}
-        except Exception as e:  # noqa: BLE001 - one bad request must not stop the worker
+        except Exception as e:
             res = {"id": req.get("id") if isinstance(req, dict) else None, "error": str(e)[:500]}
         out.write(json.dumps(res) + "\n")
         out.flush()

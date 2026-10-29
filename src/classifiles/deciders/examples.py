@@ -32,7 +32,8 @@ class ExampleDecider:
         extras: the neighbours (for the folder suggestion) and the text/picture vectors (kept so the
         proposal can be re-scored later without reading the file again)."""
         if self.index.size == 0:
-            raise ValueError("The example index is empty. Build it first (Categories → What the model learned → Build index).")
+            raise ValueError("The example index is empty. "
+                             "Build it first (Categories → What the model learned → Build index).")
         vec = self.index.embedder.encode([query_text(ev)], query=True)[0]
         ivec = self._image_vector(ev)
         probs, reason, nbs = self.score(vec, ivec, categories, exclude_ids, image_exclude_ids)
@@ -74,7 +75,7 @@ class ExampleDecider:
                 total = sum(p_tr.values()) or 1.0
                 p_tr = {k: p / total for k, p in p_tr.items()}
                 probs_by_key = blend({k: probs_by_key.get(k, 0.0) for k in by_key}, p_tr, self.trained_weight)
-                top = max(p_tr, key=p_tr.get)
+                top = max(p_tr, key=p_tr.__getitem__)
                 reason = f"trained model: {by_key[top].name} {p_tr[top]:.0%}" + ("; " + reason if reason else "")
 
         if ivec is not None and self.image_index is not None and (self.image_index.size or image_extra):

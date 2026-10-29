@@ -5,7 +5,7 @@ import pytest
 
 from classifiles import trained as tr
 from classifiles.examples import inbox_text
-from test_examples import FakeEmbedder, ex_service, sorted_tree  # noqa: F401 - fixtures
+from fakes import FakeEmbedder
 
 
 class SpyEmbedder(FakeEmbedder):
@@ -120,7 +120,7 @@ def test_choose_c_and_training_set():
     assert C in (0.1, 1.0) and set(scores) == {0.1, 1.0}
     rows = [{"id": i, "category_key": "k", "origin": "applied" if i == 2 else "scan",
              "qvector": np.ones(4, np.float16).tobytes()} for i in range(3)]
-    X, y, w = tr.training_set(rows, exclude_ids={0}, applied_weight=3)
+    X, _y, w = tr.training_set(rows, exclude_ids={0}, applied_weight=3)
     assert X.shape == (2, 4) and list(w) == [1, 3]
 
 

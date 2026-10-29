@@ -2,23 +2,25 @@
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import threading
 import uuid
+from collections.abc import Callable
 from pathlib import Path, PurePath
-from typing import Callable
+from typing import Any
 
+from . import llm, naming
 from .classifier import Classifier
 from .config import ACTIONS, Settings
 from .deciders import Decider, make_decider
 from .deciders.examples import DECIDED, ExampleDecider
-from .embedder import Embedder
-from . import llm, naming
 from .duplicates import Catalog, find_duplicates
-from .image_index import ImageEmbedder, ImageIndex, is_image
+from .embedder import Embedder
 from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text, inbox_text
 from .extract import extract
+from .image_index import ImageEmbedder, ImageIndex, is_image
 from .mover import MoveError, execute, plan_move, purge, revert
 from .paths import normalize_subpath, numbered_sibling, suggest_folder_name, suggest_subpath
 from .rules import load_rules
@@ -52,11 +54,12 @@ class ClassifilesService:
         self.store = store or Store(self.settings.db_path)
         self._catalog = Catalog(self.store)
         self._image_index: ImageIndex | None = None
-        self._trained = None  # (embedding model, TrainedModel | None), loaded lazily
+        self._trained: tuple[str, Any] | None = None  # (embedding model, TrainedModel | None), loaded lazily
         self._trained_status: dict = {"state": "idle"}
         self._train_lock = threading.Lock()
         self._train_timer: threading.Timer | None = None
         self._auto_trained = False
+        self._relearn_cache: tuple = (None, {})  # (signature, {proposal id: stored candidates})
         self.retrain_delay = 30.0  # seconds after an apply/undo before retraining (debounced)
         self._labeller = None
         self._places = None
@@ -173,7 +176,7 @@ class ClassifilesService:
             self._trained = (model, m)
             self.reset_decider()
             self._trained_status = {"state": "done", "finished_at": now()}
-        except Exception as e:  # noqa: BLE001 - shown in the UI
+        except Exception as e:
             log.exception("training the classifier failed")
             self._trained_status = {"state": "failed", "error": str(e)[:300]}
         finally:
@@ -188,10 +191,8 @@ class ClassifilesService:
             self._train_timer.cancel()
 
         def run():
-            try:
+            with contextlib.suppress(OSError):
                 os.nice(10)
-            except OSError:
-                pass
             self.retrain()
 
         self._train_timer = threading.Timer(self.retrain_delay if delay is None else delay, run)
@@ -290,7 +291,7 @@ class ClassifilesService:
                 "catalog": {**self._catalog.status, "files": self._catalog.count(),
                             "enabled": self._catalog_wanted()}}
 
-    def _learn(self, items: list[tuple[str, str, str]]) -> None:
+    def _learn(self, items: list[tuple[str, str, str, str]]) -> None:
         """Add applied files to the example index in the background. Happens with any model as long
         as an index exists, so no decision is lost when switching models later."""
         if not items:
@@ -304,7 +305,7 @@ class ClassifilesService:
         if items:
             self.example_index().remove(items)
 
-    def unlearned_decisions(self) -> list[tuple[str, str, str]]:
+    def unlearned_decisions(self) -> list[tuple[str, str, str, str]]:
         """Applied files (not undone) that are not in the index as learned examples yet, as
         (category_key, relpath, text) built from the stored evidence. No file access needed."""
         rows = self.store.query("""
@@ -350,7 +351,7 @@ class ClassifilesService:
         model was selected). Uses the stored evidence only; runs in seconds."""
         items = self.unlearned_decisions()
         self.example_index().add(items)
-        by = {}
+        by: dict[str, int] = {}
         for key, *_ in items:
             kind = "delete" if key == DELETE_KEY else "move/copy"
             by[kind] = by.get(kind, 0) + 1
@@ -421,6 +422,7 @@ class ClassifilesService:
                 except FileNotFoundError:  # moved or deleted since the scan started
                     proposal = None
                 else:
+                    assert proposal is not None
                     out.append(proposal)
                     if candidate:
                         candidates.append(candidate)
@@ -495,7 +497,7 @@ class ClassifilesService:
                     self.store.update("proposals", p["id"], {"content_hash": hashes[path]})
                 continue
             where = "in your folders" if d.kind == "sorted" else "in the inbox"
-            values = {"duplicate_of": d.of, "duplicate_kind": d.kind, "duplicate_path": d.path,
+            values: dict[str, Any] = {"duplicate_of": d.of, "duplicate_kind": d.kind, "duplicate_path": d.path,
                       "suggested_name": None, "new_name": None, "name_reason": None,
                       "content_hash": d.content_hash, "updated_at": now(),
                       "reason": f"identical to {d.of} ({where})"}
@@ -503,8 +505,8 @@ class ClassifilesService:
                 values.update({"target": delete.name, "final_target": delete.name, "confidence": 1.0,
                                "source": "duplicate", "status": "suggested", "subpath": "",
                                "suggested_subpath": "", "new_folder": None,
-                               "alternatives": [{"folder": delete.name, "probability": 1.0}] +
-                                               [a for a in p["alternatives"] if a["folder"] != delete.name][:3]})
+                               "alternatives": [{"folder": delete.name, "probability": 1.0},
+                                                *[a for a in p["alternatives"] if a["folder"] != delete.name][:3]]})
             self.store.update("proposals", p["id"], values)
 
     def _folder_for(self, target: str | None, neighbours: list[dict], filename: str) -> tuple[str, str | None, bool]:
@@ -633,7 +635,7 @@ class ClassifilesService:
                     label, share = self.labeller().label(vec)
                     if label:
                         hints.update(label=label, label_share=round(share, 3))
-            except Exception:  # noqa: BLE001 - recognition is optional, never breaks a scan
+            except Exception:
                 log.exception("picture recognition for a file name failed")
         gps = (ev.meta or {}).get("gps")
         if s.name_media_place and gps:
@@ -733,8 +735,8 @@ class ClassifilesService:
         types = llm.type_options(p["name"], ev.text, rule_type)
         p_type = llm.ask_rotated(client, lambda order: llm.build_type_prompt(ev, order), types,
                                  self.settings.llm_rotations)
-        t = max(p_type, key=p_type.get)
-        t = None if t == llm.OTHER else t
+        best_type = max(p_type, key=p_type.__getitem__)
+        t = None if best_type == llm.OTHER else best_type
         cands = naming.subject_candidates(PurePath(p["name"]).stem, ev.text, p["subpath"] or "",
                                           (ev_d.get("meta") or {}).get("source"), t)[:5]
         subject = where = None
@@ -743,7 +745,7 @@ class ClassifilesService:
             word = naming.TYPE_WORDS[t][0] if t else None
             p_subj = llm.ask_rotated(client, lambda order: llm.build_subject_prompt(ev, order, word), names,
                                      self.settings.llm_rotations)
-            best = max(p_subj, key=p_subj.get)
+            best = max(p_subj, key=p_subj.__getitem__)
             if best != llm.NONE:
                 subject, where = best, dict(cands)[best]
         choice = {"type": t, "subject": subject, "subject_where": where}
@@ -761,7 +763,7 @@ class ClassifilesService:
         category, confidence or status: in testing, agreement was a good sign on real inbox files
         but raised confidence for wrong answers on files of unsorted topics."""
         p_llm = answer["p_llm"]
-        choice = max(p_llm, key=p_llm.get)
+        choice = max(p_llm, key=p_llm.__getitem__)
         note = "agrees" if choice == p["target"] else f"suggests {choice}"
         self.store.update("proposals", p["id"], {
             "llm_choice": choice, "llm_confidence": round(p_llm[choice], 4), "knn_confidence": p["confidence"],
@@ -837,11 +839,13 @@ class ClassifilesService:
 
     def proposals(self, scan_id: int | None = None, status: str | None = None) -> list[dict]:
         scan_id = scan_id or self.latest_scan_id()
-        sql, params = PROPOSALS_SQL + " WHERE p.scan_id = ?", [scan_id]
+        sql = PROPOSALS_SQL + " WHERE p.scan_id = ?"
+        params: list[Any] = [scan_id]
         if status:
             sql += " AND p.status = ?"
             params.append(status)
-        return [_without_vectors(p) for p in self.store.query(sql + " ORDER BY p.confidence DESC, p.name", tuple(params))]
+        rows = self.store.query(sql + " ORDER BY p.confidence DESC, p.name", tuple(params))
+        return [_without_vectors(p) for p in rows]
 
     def current_path(self, proposal_id: int) -> Path:
         """Where the proposal's file is now: its applied destination, else its original path."""
@@ -886,7 +890,8 @@ class ClassifilesService:
                 if target != p["final_target"] or sub != p["subpath"]:
                     values.update(self._renamed(p, target, sub))
                 if use_suggested_name is not None:
-                    values["new_name"] = values.get("suggested_name", p["suggested_name"]) if use_suggested_name else None
+                    suggested = values.get("suggested_name", p["suggested_name"])
+                    values["new_name"] = suggested if use_suggested_name else None
                 if name is not None:
                     values["new_name"] = self._typed_name(name, p["name"])
         elif action == "reject":
@@ -964,7 +969,7 @@ class ClassifilesService:
             target, conf = ranked[0][0], round(ranked[0][1], 4)
             # the model's own answer, without the user's decisions
             base = decider.score(qv, iv, model_cats, base=bases[r["id"]])[0] if extra else probs
-            base_target = max(base, key=base.get) if base else None
+            base_target = max(base, key=base.__getitem__) if base else None
             relearned = int(bool(extra) and (base_target != target or abs(base.get(target, 0) - conf) > 0.05))
             if target == r["target"] and abs(conf - r["confidence"]) < 0.005 and relearned == r["relearned"]:
                 continue
@@ -987,7 +992,7 @@ class ClassifilesService:
         sig = (scan_id, self.settings.embedding_model, decider.index.size,
                decider.image_index.size if decider.image_index is not None else 0,
                tuple(sorted(category_key(c) for c in categories)))
-        cache = self._relearn_cache if getattr(self, "_relearn_cache", (None,))[0] == sig else (sig, {})
+        cache = self._relearn_cache if self._relearn_cache[0] == sig else (sig, {})
         missing = [r for r in todo if r["id"] not in cache[1]]
         if missing:
             found = decider.candidates([_vec(r["qvec"]) for r in missing],
@@ -1082,7 +1087,8 @@ class ClassifilesService:
             m, err = self._plan(p)
             out.append({"proposal_id": p["id"], "src": p["path"], "dst": str(m.dst) if m else None,
                         "action": m.action if m else None, "category": p["final_target"],
-                        "subpath": p["subpath"] or "", "renamed": bool(m and m.action != "delete" and p.get("new_name")),
+                        "subpath": p["subpath"] or "",
+                        "renamed": bool(m and m.action != "delete" and p.get("new_name")),
                         "creates": str(m.created_dir) if m and m.created_dir else None, "error": err})
         return out
 
@@ -1263,5 +1269,5 @@ def _without_vectors(p: dict) -> dict:
 def _quietly(fn, *args) -> None:
     try:
         fn(*args)
-    except Exception:  # noqa: BLE001 - learning is best effort, never breaks apply
+    except Exception:
         log.exception("learning from applied files failed")

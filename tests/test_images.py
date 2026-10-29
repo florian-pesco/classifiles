@@ -1,40 +1,9 @@
 """Image similarity with a fake image model (colour histogram), so no download and no GPU."""
 
-import numpy as np
 import pytest
-from PIL import Image
 
 from classifiles.image_index import ImageIndex, is_image
-from test_examples import FakeEmbedder
-
-
-class FakeImageEmbedder:
-    """Vector = normalised mean colour + a bit of structure: same-coloured pictures are similar."""
-
-    model_name = "fake-image"
-    loaded = True
-
-    def encode_paths(self, paths):
-        vecs, ok = [], []
-        for i, p in enumerate(paths):
-            try:
-                with Image.open(p) as im:
-                    a = np.asarray(im.convert("RGB").resize((8, 8)), dtype=np.float32).reshape(-1) / 255
-            except Exception:  # noqa: BLE001
-                continue
-            v = np.concatenate([a, [1.0]])
-            vecs.append(v / np.linalg.norm(v))
-            ok.append(i)
-        return (np.stack(vecs).astype(np.float32) if vecs else np.zeros((0, 193), np.float32)), ok
-
-    def unload(self):
-        pass
-
-
-def picture(path, colour, size=(64, 48)):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size, colour).save(path)
-    return path
+from fakes import FakeEmbedder, FakeImageEmbedder, picture
 
 
 @pytest.fixture

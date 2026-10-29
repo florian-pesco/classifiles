@@ -86,7 +86,8 @@ _SCANNAME = re.compile(r"^(scan|document|dokument)[ _-]?\d", re.I)
 _COUNT_WORDS = ("sheet", "blatt", "chapter", "kapitel", "ch", "week", "woche", "lecture", "vorlesung", "vl",
                 "part", "teil", "exercise", "uebung", "übung", "aufgabe", "task", "session", "unit", "lesson",
                 "lektion", "termin", "tutorial", "tut")
-_COUNT = re.compile(rf"(?<![A-Za-zÄÖÜäöüß])([A-Za-zÄÖÜäöüß]*?(?:{'|'.join(_COUNT_WORDS)}))[ _.-]?0*(\d{{1,3}})(?!\d)", re.I)
+_COUNT = re.compile(rf"(?<![A-Za-zÄÖÜäöüß])([A-Za-zÄÖÜäöüß]*?(?:{'|'.join(_COUNT_WORDS)}))"
+                    r"[ _.-]?0*(\d{1,3})(?!\d)", re.I)
 _DE_HINT = re.compile(r"rechnung|vertrag|quittung|kontoauszug|abrechnung|angebot|bestellung|versicherung|steuer|"
                       r"zeugnis|bescheinigung|bewerbung|lebenslauf|fahrkarte|formular|antrag|anleitung|handbuch|"
                       r"klausur|prüfung|lösung|loesung|übung|uebung|blatt|folien|vorlesung|mitschrift|zusammenfassung|"
@@ -100,8 +101,8 @@ _GENERIC_FOLDERS = re.compile(r"^(\d+|misc|sonstiges|diverses|other|others|ander
 # the sender in the text says something for these; on a CV or thesis it's just a mail or university domain
 SENDER_TYPES = {"Invoice", "Receipt", "Statement", "Payslip", "Contract", "Offer", "Order", "Insurance", "Tax",
                 "Certificate", "Ticket", "Letter", "Form", None}
-_SUFFIX = re.compile(r"\b([A-ZÄÖÜ][\w&.-]*(?:\s+[A-ZÄÖÜ&][\w&.-]*){0,2})\s+(GmbH|AG|KG|SE|UG|e\.\s?V\.|Inc\.?|Ltd\.?|LLC|"
-                     r"GbR|OHG|mbH)\b")
+_SUFFIX = re.compile(r"\b([A-ZÄÖÜ][\w&.-]*(?:\s+[A-ZÄÖÜ&][\w&.-]*){0,2})\s+"
+                     r"(GmbH|AG|KG|SE|UG|e\.\s?V\.|Inc\.?|Ltd\.?|LLC|GbR|OHG|mbH)\b")
 _MAIL = re.compile(r"[\w.+-]+@([a-z0-9-]+)\.[a-z.]{2,}", re.I)
 _WEB = re.compile(r"\bwww\.([a-z0-9-]+)\.[a-z]{2,}", re.I)
 _FREE_MAIL = {"gmail", "googlemail", "gmx", "web", "outlook", "hotmail", "yahoo", "icloud", "live", "t-online",
@@ -172,7 +173,7 @@ def detect_type(name: str, text: str = "") -> tuple[str | None, str]:
     scores = type_scores(name, text)
     if not scores:
         return None, ""
-    best = max(scores, key=scores.get)
+    best = max(scores, key=scores.__getitem__)
     if scores[best] < 2 and best == "Letter":
         return None, ""  # a greeting alone is weak
     pats = dict(_KW)[best]
@@ -222,7 +223,8 @@ def _mk_date(parts: dict) -> tuple[str, int] | None:
 
 def find_dates(s: str) -> list[tuple[int, str, int, bool]]:
     """[(position, date, precision, after a date word like 'Rechnungsdatum')] in order of position."""
-    out, taken = [], []
+    out: list[tuple[int, str, int, bool]] = []
+    taken: list[tuple[int, int]] = []
     for rx, groups in _DATE_PATTERNS:
         for m in rx.finditer(s):
             if any(a < m.end() and m.start() < b for a, b in taken):
@@ -285,7 +287,7 @@ def name_words(stem: str) -> list[str]:
     s = re.sub(r"([a-zäöüß])([A-ZÄÖÜ])", r"\1 \2", s)  # camelCase
     words = [w for w in re.split(r"[\s_.,;()\[\]+-]+", s) if w]
     type_kw = {k for _, _, kws in TYPES for k in kws}
-    keep = []
+    keep: list[str] = []
     for w in words:
         low = w.lower()
         if low in type_kw or low in _JUNK_WORDS or low in _STOP_DE or low in _STOP_EN or (w.isdigit() and len(w) > 2):
@@ -407,11 +409,13 @@ def suggest(name: str, kind: str, text: str = "", meta: dict | None = None, subp
     why = []
 
     # type: language model > keywords > the folder's type ('Lebensläufe') > picture kind
+    t: str | None
     if type_:
         t, t_where = type_, "chosen by the language model"
     else:
         t, t_where = detect_type(stem, text)
-        folder_type = next((type_of_word(x) for x in reversed((subpath or "").split("/")) if x and type_of_word(x)), None)
+        folder_types = (type_of_word(x) for x in reversed((subpath or "").split("/")) if x)
+        folder_type = next((t for t in folder_types if t), None)
         if t is None and folder_type:
             t, t_where = folder_type, "the folder it goes to"
         if t is None and kind == "image":
@@ -515,7 +519,7 @@ def _is_meaningless(core: str) -> bool:
 
 def _taken_date(meta: dict) -> str | None:
     m = re.match(r"(\d{4})[:-](\d\d)[:-](\d\d)", str(meta.get("taken") or ""))
-    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m and 1990 <= int(m.group(1)) else None
+    return f"{m.group(1)}-{m.group(2)}-{m.group(3)}" if m and int(m.group(1)) >= 1990 else None
 
 
 def suggest_media(name: str, kind: str, meta: dict | None = None, subpath: str = "", hints: dict | None = None,
@@ -542,7 +546,8 @@ def suggest_media(name: str, kind: str, meta: dict | None = None, subpath: str =
         core = core[:MAX_CORE].rstrip("_-. ")
 
     in_core = _norm(core).replace("_", "").replace("-", "")
-    title, sources = [], []
+    title: list[str] = []
+    sources: list[str] = []
     candidates = [(topic_folder(subpath), "topic folder"),
                   (hints.get("label"), f"picture recognition ({hints.get('label_share', 0):.2f})"),
                   (hints.get("place"), "GPS")]

@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from .base import Evidence, kind_of
 from . import archive, image, office, pdf, text, video
+from .base import Evidence, kind_of
 
 log = logging.getLogger(__name__)
 
-# kind -> extractor(path, max_chars) -> (text, meta)
-_EXTRACTORS = {
+# kind -> extractor(path, max_chars, ...) -> (text, meta); pdf and image take one more option
+_EXTRACTORS: dict[str, Callable[..., tuple[str, dict]]] = {
     "pdf": pdf.extract,
     "document": office.extract,
     "spreadsheet": office.extract,

@@ -20,9 +20,9 @@ import threading
 import time
 import zlib
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 
@@ -164,7 +164,7 @@ class ExampleIndex:
         self.content_per_category = content_per_category
         self.k = k
         self.temperature = temperature
-        self._data = None  # (ids, key_codes, keys, relpaths, matrix)
+        self._data: tuple | None = None  # (ids, key_codes, keys, relpaths, matrix)
         self._thread: threading.Thread | None = None
         self._cancel = threading.Event()
         self.status: dict = {"state": "idle"}
@@ -278,7 +278,7 @@ class ExampleIndex:
             self.load()
             state = "cancelled" if self._cancel.is_set() else "done"
             self._progress(state=state, message=state, finished_at=now(), category=None)
-        except Exception as e:  # noqa: BLE001 - surfaced in the UI
+        except Exception as e:
             log.exception("index build failed")
             self._progress(state="failed", error=str(e)[:500], finished_at=now())
         return self.status
@@ -296,6 +296,7 @@ class ExampleIndex:
 
     def _index_category(self, c: Category) -> None:
         key, model, root = category_key(c), self.embedder.model_name, c.path
+        assert root is not None
         sample = sample_folder(root, self.per_category)
         existing = {r["relpath"]: r for r in self.store.query(
             "SELECT id, relpath, mtime, has_content FROM examples WHERE category_key = ? AND origin = 'scan' "
@@ -368,6 +369,7 @@ class ExampleIndex:
         """Inbox-style vectors for examples indexed before they existed. Name-only examples are done
         from the stored path (no disk access); examples whose text was read need it once more."""
         key, root = category_key(c), c.path
+        assert root is not None
         rows = self.store.query("SELECT id, relpath, has_content FROM examples WHERE category_key = ? "
                                 "AND origin = 'scan' AND model = ? AND qvector IS NULL",
                                 (key, self.embedder.model_name))
@@ -411,7 +413,8 @@ class ExampleIndex:
         vecs = self.embedder.encode([it[2] for it in items])
         qvecs = self.embedder.encode([it[3] for it in items], query=True)
         self.store.executemany(
-            "INSERT OR REPLACE INTO examples (category_key, relpath, mtime, origin, has_content, model, vector, qvector) "
+            "INSERT OR REPLACE INTO examples "
+            "(category_key, relpath, mtime, origin, has_content, model, vector, qvector) "
             "VALUES (?, ?, ?, 'applied', 0, ?, ?, ?)",
             [(it[0], it[1], time.time(), self.embedder.model_name, v.astype(np.float16).tobytes(),
               q.astype(np.float16).tobytes()) for it, v, q in zip(items, vecs, qvecs)])

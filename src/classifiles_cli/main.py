@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Optional
 
 import typer
 from rich.console import Console
@@ -19,7 +18,7 @@ console = Console()
 ConfigOpt = typer.Option(None, "--config", "-c", help=f"Config file (default {DEFAULT_CONFIG_PATH})")
 
 
-def _service(config: Optional[Path], **overrides) -> ClassifilesService:
+def _service(config: Path | None, **overrides) -> ClassifilesService:
     settings = Settings.load(config)
     for k, v in overrides.items():
         if v is not None:
@@ -50,7 +49,7 @@ def init(
                                     help="Folder whose subfolders become categories (repeatable)"),
     inbox: list[Path] = typer.Option([Path.home() / "Downloads"], help="Inbox folder(s) to sort"),
     threshold: float = 0.7,
-    config: Optional[Path] = ConfigOpt,
+    config: Path | None = ConfigOpt,
 ):
     """Write a starter config file. Fine-tune categories and rules in the web UI afterwards."""
     s = Settings(roots=[{"path": str(r.expanduser().resolve())} for r in root],
@@ -60,7 +59,7 @@ def init(
 
 
 @app.command()
-def folders(config: Optional[Path] = ConfigOpt):
+def folders(config: Path | None = ConfigOpt):
     """Show the category folders and how they are described to the model."""
     svc = _service(config)
     t = Table("category", "action", "source", "status", "description given to the model")
@@ -74,13 +73,13 @@ def folders(config: Optional[Path] = ConfigOpt):
 
 @app.command()
 def scan(
-    inbox: Optional[Path] = typer.Argument(None, help="Inbox folder (default: first configured inbox)"),
-    backend: Optional[str] = typer.Option(None, help="laya | keyword"),
-    threshold: Optional[float] = None,
-    limit: Optional[int] = typer.Option(None, "--limit", "-n",
+    inbox: Path | None = typer.Argument(None, help="Inbox folder (default: first configured inbox)"),
+    backend: str | None = typer.Option(None, help="laya | keyword"),
+    threshold: float | None = None,
+    limit: int | None = typer.Option(None, "--limit", "-n",
                                         help="Classify at most N files, newest first (0 = all)"),
     only_new: bool = typer.Option(False, "--only-new", help="Skip files classified in an earlier scan"),
-    config: Optional[Path] = ConfigOpt,
+    config: Path | None = ConfigOpt,
 ):
     """Classify the files in the inbox and store the proposals for review."""
     svc = _service(config, backend=backend, threshold=threshold)
@@ -103,9 +102,9 @@ def scan(
 
 @app.command("list")
 def list_(
-    scan_id: Optional[int] = typer.Option(None, "--scan"),
-    status: Optional[str] = typer.Option(None, help="suggested|needs_review|accepted|rejected|moved"),
-    config: Optional[Path] = ConfigOpt,
+    scan_id: int | None = typer.Option(None, "--scan"),
+    status: str | None = typer.Option(None, help="suggested|needs_review|accepted|rejected|moved"),
+    config: Path | None = ConfigOpt,
 ):
     """List proposals of a scan (default: latest)."""
     svc = _service(config)
@@ -115,10 +114,10 @@ def list_(
 @app.command()
 def accept(
     ids: list[int] = typer.Argument(None, help="Proposal ids; omit with --suggested"),
-    folder: Optional[str] = typer.Option(None, "--to", help="Override the target folder"),
+    folder: str | None = typer.Option(None, "--to", help="Override the target folder"),
     suggested: bool = typer.Option(False, "--suggested", help="Accept all proposals above threshold"),
-    scan_id: Optional[int] = typer.Option(None, "--scan"),
-    config: Optional[Path] = ConfigOpt,
+    scan_id: int | None = typer.Option(None, "--scan"),
+    config: Path | None = ConfigOpt,
 ):
     """Accept proposals (optionally into a different folder)."""
     svc = _service(config)
@@ -130,7 +129,7 @@ def accept(
 
 
 @app.command()
-def reject(ids: list[int], config: Optional[Path] = ConfigOpt):
+def reject(ids: list[int], config: Path | None = ConfigOpt):
     """Reject proposals (files stay where they are)."""
     svc = _service(config)
     for i in ids:
@@ -140,10 +139,10 @@ def reject(ids: list[int], config: Optional[Path] = ConfigOpt):
 
 @app.command()
 def apply(
-    scan_id: Optional[int] = typer.Option(None, "--scan"),
+    scan_id: int | None = typer.Option(None, "--scan"),
     dry_run: bool = typer.Option(False, "--dry-run", "-n"),
     yes: bool = typer.Option(False, "--yes", "-y"),
-    config: Optional[Path] = ConfigOpt,
+    config: Path | None = ConfigOpt,
 ):
     """Move all accepted files into their folders."""
     svc = _service(config)
@@ -162,8 +161,8 @@ def apply(
 
 
 @app.command()
-def undo(batch_id: Optional[str] = typer.Argument(None, help="Batch id (default: last)"),
-         config: Optional[Path] = ConfigOpt):
+def undo(batch_id: str | None = typer.Argument(None, help="Batch id (default: last)"),
+         config: Path | None = ConfigOpt):
     """Move the files of a batch back to where they came from."""
     res = _service(config).undo(batch_id)
     if not res["batch_id"]:
@@ -178,7 +177,7 @@ def undo(batch_id: Optional[str] = typer.Argument(None, help="Batch id (default:
 def index(
     learn_past: bool = typer.Option(False, "--learn-past",
                                     help="Only learn applied files that are not learned yet (no folder scan)"),
-    config: Optional[Path] = ConfigOpt,
+    config: Path | None = ConfigOpt,
 ):
     """Build or update the example index from your already-sorted files (low priority; Ctrl+C cancels)."""
     import time
@@ -220,12 +219,14 @@ def eval_(
                                     help="file: hide single files; folder: hide whole folders (new topics)"),
     decisions: bool = typer.Option(False, "--decisions", help="Measure against your real Review decisions instead"),
     second_opinion: bool = typer.Option(False, "--second-opinion",
-                                        help="Measure the language model hint on unsure files (decisions + folder split)"),
+                                        help="Measure the language model hint on unsure files "
+                                             "(decisions + folder split)"),
     trained: bool = typer.Option(False, "--trained",
-                                 help="Compare the neighbour vote with a trained classifier and blends (both splits + decisions)"),
+                                 help="Compare the neighbour vote with a trained classifier and blends "
+                                      "(both splits + decisions)"),
     details: bool = typer.Option(False, "--details", help="With --trained: full tables per method"),
     seed: int = 0,
-    config: Optional[Path] = ConfigOpt,
+    config: Path | None = ConfigOpt,
 ):
     """Measure accuracy (read-only; prints aggregates only, never file names)."""
     from classifiles.evaluate import evaluate, evaluate_decisions
@@ -276,6 +277,14 @@ def eval_(
         _print_summary(name, r)
 
 
+def _pct(x: float | None) -> str:
+    return "—" if x is None else f"{x:.0%}"
+
+
+def _suggested_right(x: dict) -> str:
+    return f"{x['suggested']:.0%} / {_pct(x['accuracy'])}"
+
+
 def _print_comparison(section: str, sec: dict, details: bool) -> None:
     results = sec["results"]
     n = next(iter(results.values())).get("files", 0)
@@ -285,9 +294,9 @@ def _print_comparison(section: str, sec: dict, details: bool) -> None:
         if not r.get("files"):
             continue
         th = {x["threshold"]: x for x in r["thresholds"]}
-        fmt = lambda x: f"{x['suggested']:.0%} / " + ("—" if x["accuracy"] is None else f"{x['accuracy']:.0%}")
         weakest = min(r["per_category"].values(), key=lambda v: v["recall"])["recall"]
-        t.add_row(name, f"{r['accuracy']:.0%}", f"{r['top3']:.0%}", fmt(th[0.7]), fmt(th[0.9]), f"{weakest:.0%}")
+        t.add_row(name, f"{r['accuracy']:.0%}", f"{r['top3']:.0%}", _suggested_right(th[0.7]),
+                  _suggested_right(th[0.9]), f"{weakest:.0%}")
     console.print(t)
     if details:
         for name, r in results.items():
@@ -299,7 +308,8 @@ def _print_summary(name: str, r: dict) -> None:
     if not r.get("files"):
         console.print(f"[bold]{name}[/]: no files\n")
         return
-    console.print(f"[bold]{name}[/] ({r['files']} files): accuracy [bold]{r['accuracy']:.0%}[/], top-3 {r['top3']:.0%}, "
+    console.print(f"[bold]{name}[/] ({r['files']} files): accuracy [bold]{r['accuracy']:.0%}[/], "
+                  f"top-3 {r['top3']:.0%}, "
                   f"mean confidence right {r['mean_confidence_right']} / wrong {r['mean_confidence_wrong']}")
     t = Table("category", "files", "recall")
     for cat, v in r["per_category"].items():
@@ -309,7 +319,7 @@ def _print_summary(name: str, r: dict) -> None:
         cal.add_row(b["range"], str(b["files"]), "—" if b["accuracy"] is None else f"{b['accuracy']:.0%}")
     th = Table("threshold", "suggested", "accuracy of suggested")
     for x in r["thresholds"]:
-        th.add_row(str(x["threshold"]), f"{x['suggested']:.0%}", "—" if x["accuracy"] is None else f"{x['accuracy']:.0%}")
+        th.add_row(str(x["threshold"]), f"{x['suggested']:.0%}", _pct(x["accuracy"]))
     console.print(t, cal, th)
     if r.get("by_decided_via"):
         console.print("by how you decided: " + "; ".join(f"{k}: {v['accuracy']:.0%} of {v['files']}"
@@ -320,7 +330,7 @@ def _print_summary(name: str, r: dict) -> None:
 
 
 @app.command()
-def serve(host: str = "127.0.0.1", port: int = 8765, config: Optional[Path] = ConfigOpt):
+def serve(host: str = "127.0.0.1", port: int = 8765, config: Path | None = ConfigOpt):
     """Start the web UI / REST API."""
     import os
 
@@ -337,7 +347,7 @@ def main() -> None:
         app()
     except (KeyError, ValueError, FileNotFoundError) as e:
         console.print(f"[red]Error:[/] {e.args[0] if e.args else e}")
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 if __name__ == "__main__":

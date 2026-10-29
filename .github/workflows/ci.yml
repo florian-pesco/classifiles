@@ -1,0 +1,44 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      # Light install: the tests use fake models, so no PyTorch / CUDA (the `examples` and `laya` extras).
+      - name: Install
+        run: |
+          uv venv
+          uv pip install -e ".[api,cli,ocr]" numpy scikit-learn threadpoolctl pytest httpx mypy ruff
+      - name: Lint
+        run: uv run --no-sync ruff check src tests
+      - name: Types
+        run: uv run --no-sync mypy
+      - name: Tests
+        run: uv run --no-sync pytest -q
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - run: npm ci
+      - run: npx eslint src
+      - run: npx tsc -b
+      - run: npx vite build

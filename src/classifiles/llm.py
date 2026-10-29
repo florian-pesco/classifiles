@@ -68,11 +68,14 @@ class LLMClient:
             raise LLMError("Language model stopped responding")
         return result
 
+    def _send(self, msg: dict) -> None:
+        assert self._proc.stdin is not None
+        self._proc.stdin.write(json.dumps(msg) + "\n")
+        self._proc.stdin.flush()
+
     def choose(self, prompt: str, options: list[str]) -> dict[str, float]:
         self._next += 1
-        self._proc.stdin.write(json.dumps({"id": self._next, "task": "choose", "prompt": prompt,
-                                           "options": options}) + "\n")
-        self._proc.stdin.flush()
+        self._send({"id": self._next, "task": "choose", "prompt": prompt, "options": options})
         res = self._read(ANSWER_TIMEOUT)
         if "error" in res:
             raise LLMError(res["error"])
@@ -81,8 +84,7 @@ class LLMClient:
     def close(self) -> None:
         if self._proc.poll() is None:
             try:
-                self._proc.stdin.write(json.dumps({"task": "shutdown"}) + "\n")
-                self._proc.stdin.flush()
+                self._send({"task": "shutdown"})
                 self._proc.wait(timeout=30)
             except (OSError, subprocess.TimeoutExpired, ValueError):
                 self._proc.kill()
@@ -168,7 +170,7 @@ def type_options(name: str, text: str, rule_type: str | None, k: int = 5) -> lis
     # fill up with common types (no keyword found: these are the usual suspects)
     opts += ["Letter", "Contract", "Invoice", "Report", "Notes", "Form", "Certificate"]
     uniq = list(dict.fromkeys(o for o in opts if o and o not in ("Screenshot", "Scan")))[:k]
-    return uniq + [OTHER]
+    return [*uniq, OTHER]
 
 
 def build_type_prompt(ev, options: list[str]) -> str:

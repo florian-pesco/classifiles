@@ -119,7 +119,7 @@ class Settings:
                 raise ValueError(f"Category action must be one of {ACTIONS}: {c}")
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "Settings":
+    def load(cls, path: str | Path | None = None) -> Settings:
         if path is not None and not Path(path).exists():
             raise FileNotFoundError(f"Config file not found: {path}")
         path = Path(path) if path else DEFAULT_CONFIG_PATH
@@ -128,7 +128,7 @@ class Settings:
         return cls.from_dict(yaml.safe_load(path.read_text()) or {}, source=str(path))
 
     @classmethod
-    def from_dict(cls, data: dict, source: str = "config") -> "Settings":
+    def from_dict(cls, data: dict, source: str = "config") -> Settings:
         data = _upgrade_legacy(dict(data))
         known = {f.name for f in fields(cls)}
         unknown = set(data) - known

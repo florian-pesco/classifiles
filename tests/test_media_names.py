@@ -70,7 +70,8 @@ def test_mp4_header(tmp_path):
     mvhd = _box(b"mvhd", bytes(4) + struct.pack(">II", secs, secs) + bytes(88))
     xyz = _box(b"\xa9xyz", struct.pack(">HH", 18, 0) + b"+48.1372+011.5756/")
     path = tmp_path / "VID_1.mp4"
-    path.write_bytes(_box(b"ftyp", b"isom" + bytes(4)) + _box(b"moov", mvhd + _box(b"udta", xyz)) + _box(b"mdat", bytes(64)))
+    moov = _box(b"moov", mvhd + _box(b"udta", xyz))
+    path.write_bytes(_box(b"ftyp", b"isom" + bytes(4)) + moov + _box(b"mdat", bytes(64)))
     meta = header_meta(path)
     assert meta["taken"].startswith("2025-03-") and meta["gps"] == [48.1372, 11.5756]
     assert extract(path).meta == meta and extract(path).kind == "video"

@@ -1,6 +1,5 @@
 """Roots + manual categories, copy/delete actions, trash, config upgrade."""
 
-from pathlib import Path
 
 import pytest
 

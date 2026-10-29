@@ -41,7 +41,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     source TEXT NOT NULL,
     alternatives TEXT NOT NULL,         -- JSON
     reason TEXT NOT NULL DEFAULT '',
-    -- suggested (>= threshold) | needs_review | accepted | rejected | moved (= applied: moved, copied or trashed; see moves.action)
+    -- suggested (>= threshold) | needs_review | accepted | rejected
+    -- | moved (= applied: moved, copied or trashed; see moves.action)
     status TEXT NOT NULL,
     final_target TEXT,                  -- what the user accepted (defaults to target)
     decided_via TEXT,                   -- confirm | override | bulk | reject (NULL: undecided or before tracking)
@@ -221,7 +222,9 @@ class Store:
         values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS else v for k, v in values.items()}
         cols = ", ".join(values)
         marks = ", ".join(f":{k}" for k in values)
-        return self.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", values).lastrowid
+        row_id = self.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", values).lastrowid
+        assert row_id is not None
+        return row_id
 
     def update(self, table: str, id: int, values: dict) -> None:
         values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS and v is not None else v

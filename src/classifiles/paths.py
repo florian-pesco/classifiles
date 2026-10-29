@@ -159,7 +159,8 @@ def normalize_subpath(subpath: str | None) -> str:
 
 def split_existing(category_path: Path, subpath: str) -> tuple[str, list[str]]:
     """(existing part, missing folder names) of a subpath inside the category folder."""
-    existing, missing = [], []
+    existing: list[str] = []
+    missing: list[str] = []
     current = category_path
     for part in [p for p in subpath.split("/") if p]:
         current = current / part

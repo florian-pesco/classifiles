@@ -29,14 +29,15 @@ class Rule:
     glob: str | None = None
 
     @classmethod
-    def from_dict(cls, d: dict) -> "Rule":
+    def from_dict(cls, d: dict) -> Rule:
         if "folder" not in d:
             raise ValueError(f"Rule needs a 'folder': {d}")
         if not any(k in d for k in ("ext", "kind", "name", "glob")):
             raise ValueError(f"Rule needs at least one condition (ext/kind/name/glob): {d}")
         return cls(
             folder=d["folder"],
-            ext=[e.lower() if e.startswith(".") else "." + e.lower() for e in _as_list(d["ext"])] if "ext" in d else None,
+            ext=[e.lower() if e.startswith(".") else "." + e.lower() for e in _as_list(d["ext"])]
+            if "ext" in d else None,
             kind=_as_list(d["kind"]) if "kind" in d else None,
             name=re.compile(d["name"], re.I) if "name" in d else None,
             glob=d.get("glob"),
@@ -49,9 +50,7 @@ class Rule:
             return False
         if self.name is not None and not self.name.search(ev.name):
             return False
-        if self.glob is not None and not fnmatch.fnmatch(ev.name.lower(), self.glob.lower()):
-            return False
-        return True
+        return self.glob is None or fnmatch.fnmatch(ev.name.lower(), self.glob.lower())
 
     def describe(self) -> str:
         parts = []

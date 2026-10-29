@@ -1,60 +1,12 @@
 """Example index and example-based classification, with a deterministic fake embedder (no model)."""
 
 import socket
-import zlib
 
-import numpy as np
 import pytest
 
-from classifiles.examples import DELETE_KEY, ExampleIndex, sample_folder
 from classifiles.evaluate import evaluate, evaluate_decisions
+from classifiles.examples import DELETE_KEY, sample_folder
 from classifiles.store import Store
-
-DIM = 64
-
-
-class FakeEmbedder:
-    """Bag-of-words hashing: texts sharing words get similar vectors. No model, no network."""
-
-    model_name = "fake"
-    loaded = True
-
-    def encode(self, texts, query=False):
-        out = np.zeros((len(texts), DIM), np.float32)
-        for i, t in enumerate(texts):
-            for w in t.lower().replace("/", " ").replace("_", " ").replace(".", " ").split():
-                out[i, zlib.crc32(w.encode()) % DIM] += 1
-        norms = np.linalg.norm(out, axis=1, keepdims=True)
-        return out / np.where(norms == 0, 1, norms)
-
-    def unload(self):
-        pass
-
-
-@pytest.fixture
-def sorted_tree(tree):
-    """Give each category several already-sorted files with telling names."""
-    names = {
-        "Finance": ["invoice_jan.txt", "invoice_feb.txt", "bank_statement_march.txt", "tax_return.txt"],
-        "Work": ["meeting_notes_monday.txt", "project_report.txt", "meeting_agenda.txt"],
-        "Photos": ["holiday_beach.jpg", "holiday_mountain.jpg", "camera_photo.jpg"],
-        "Software": ["setup_tool.exe", "driver_installer.msi"],
-    }
-    for cat, files in names.items():
-        sub = tree["root"] / cat / "2025"
-        sub.mkdir(exist_ok=True)
-        for f in files:
-            (sub / f).write_text(f.replace("_", " "))
-    return tree
-
-
-@pytest.fixture
-def ex_service(service):
-    service.settings.backend = "examples"
-    service._index = ExampleIndex(service.store, FakeEmbedder(), per_category=100, content_per_category=10)
-    service.settings.embedding_model = "fake"
-    service.reset_decider()  # the base fixture pre-sets the keyword decider
-    return service
 
 
 def test_sample_folder_spreads_over_subfolders(tmp_path):
@@ -191,7 +143,8 @@ def test_folder_split_hides_siblings(ex_service, sorted_tree):
     assert set(report["results"]) == {"examples (file split)", "examples (folder split)"}
     # every category's files share one folder: with siblings hidden only the descriptions remain,
     # so the folder split must be clearly worse than the file split
-    assert report["results"]["examples (folder split)"]["accuracy"] < report["results"]["examples (file split)"]["accuracy"]
+    res = report["results"]
+    assert res["examples (folder split)"]["accuracy"] < res["examples (file split)"]["accuracy"]
 
 
 def test_evaluate_decisions_and_no_file_names(ex_service, sorted_tree):

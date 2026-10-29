@@ -282,6 +282,7 @@ svc.undo()
 | Task | Command |
 |---|---|
 | Run tests | `uv run pytest` |
+| Lint and types | `uvx ruff check src tests` · `uv run mypy` (both run in CI on every PR) |
 | Backend with auto-reload | `uv run uvicorn classifiles_api.app:create_app --factory --reload --port 8765` |
 | Frontend with hot reload | `cd web && npm run dev` → http://localhost:5173 (proxies `/api` to 8765) |
 | Rebuild the UI served by `classifiles serve` | `cd web && npm run build` |

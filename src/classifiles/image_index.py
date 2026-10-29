@@ -19,6 +19,7 @@ import os
 import threading
 import time
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 
@@ -31,6 +32,7 @@ log = logging.getLogger(__name__)
 
 IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 MAX_WALK = 60_000
+_INSERT = "INSERT OR REPLACE INTO image_examples (category_key, relpath, mtime, model, vector) VALUES (?, ?, ?, ?, ?)"
 
 
 def is_image(path: Path | str) -> bool:
@@ -44,8 +46,8 @@ class ImageEmbedder:
         self.gpu_memory_fraction = gpu_memory_fraction
         self.cpu_threads = cpu_threads
         self.batch_size = batch_size
-        self._model = None
-        self._proc = None
+        self._model: Any = None
+        self._proc: Any = None
         self._device = "cpu"
         self._lock = threading.Lock()
 
@@ -80,12 +82,12 @@ class ImageEmbedder:
         from PIL import Image
 
         try:
-            im = Image.open(path)
-            im.draft("RGB", (448, 448))  # JPEG: decode at 1/2..1/8 size directly
-            im = im.convert("RGB")
+            src = Image.open(path)
+            src.draft("RGB", (448, 448))  # JPEG: decode at 1/2..1/8 size directly
+            im = src.convert("RGB")
             im.thumbnail((448, 448))
             return im
-        except Exception:  # noqa: BLE001 - broken or unsupported images are skipped
+        except Exception:
             return None
 
     def encode_images(self, images: list) -> np.ndarray:
@@ -130,7 +132,7 @@ class ImageIndex:
         self.max_bytes = max_mb * 1024 * 1024
         self.k = k
         self.temperature = temperature
-        self._data = None
+        self._data: tuple | None = None
         self._cancel = threading.Event()
         self.status: dict = {"state": "idle"}
 
@@ -210,13 +212,14 @@ class ImageIndex:
             self.load()
             state = "cancelled" if self._cancel.is_set() else "done"
             self.status = {**self.status, "state": state, "message": state, "finished_at": now()}
-        except Exception as e:  # noqa: BLE001 - shown in the UI
+        except Exception as e:
             log.exception("image index build failed")
             self.status = {**self.status, "state": "failed", "error": str(e)[:500]}
         return self.status
 
     def _index_category(self, c: Category) -> None:
         key, root, model = category_key(c), c.path, self.embedder.model_name
+        assert root is not None
         sample = [rel for rel in sample_folder(root, self.per_category * 4, MAX_WALK) if is_image(rel)]
         sample = sample[:self.per_category]
         existing = {r["relpath"]: r for r in self.store.query(
@@ -243,7 +246,7 @@ class ImageIndex:
             vecs, ok = self.embedder.encode_paths([root / rel for rel, _ in batch])
             rows = [(key, batch[i][0], batch[i][1], model, v.astype(np.float16).tobytes()) for i, v in zip(ok, vecs)]
             self.store.executemany(
-                "INSERT OR REPLACE INTO image_examples (category_key, relpath, mtime, model, vector) VALUES (?, ?, ?, ?, ?)",
+                _INSERT,
                 rows)
             self.status = {**self.status, "done": min(start + BATCH, len(todo)),
                            "added": self.status["added"] + len(rows)}
@@ -266,7 +269,7 @@ class ImageIndex:
                 mtime = time.time()
             rows.append((key, rel, mtime, self.embedder.model_name, v.astype(np.float16).tobytes()))
         self.store.executemany(
-            "INSERT OR REPLACE INTO image_examples (category_key, relpath, mtime, model, vector) VALUES (?, ?, ?, ?, ?)",
+            _INSERT,
             rows)
         self.load()
 

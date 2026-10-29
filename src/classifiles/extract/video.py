@@ -120,5 +120,5 @@ def middle_frame(path: Path):
         im = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         im.thumbnail((448, 448))
         return im
-    except Exception:  # noqa: BLE001 - a broken video must never stop a scan
+    except Exception:
         return None

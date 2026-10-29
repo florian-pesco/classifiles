@@ -135,9 +135,8 @@ def test_apply_trashes_duplicate_without_learning_and_keeps_catalog_current(serv
 
 
 def test_index_build_also_builds_the_catalog(service, tree, monkeypatch):
-    from test_examples import FakeEmbedder
-
     from classifiles.examples import ExampleIndex
+    from fakes import FakeEmbedder
 
     service.settings.embedding_model = "fake"
     service._index = ExampleIndex(service.store, FakeEmbedder(), per_category=50, content_per_category=5)

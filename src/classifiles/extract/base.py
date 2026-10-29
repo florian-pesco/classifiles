@@ -61,7 +61,7 @@ def _short(v, n: int = 200) -> str:
     return s if len(s) <= n else s[: n - 1] + "…"
 
 
-def _human(n: int) -> str:
+def _human(n: float) -> str:
     for unit in ("B", "KB", "MB", "GB"):
         if n < 1024:
             return f"{n:.0f} {unit}"

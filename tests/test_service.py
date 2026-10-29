@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from classifiles.mover import MoveError, free_name, plan_move
+from classifiles.mover import free_name, plan_move
 
 
 def test_scan_skips_partial_downloads(service, tree):

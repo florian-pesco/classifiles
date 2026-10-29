@@ -15,7 +15,7 @@ dependencies = [
 
 [project.optional-dependencies]
 laya = ["laya>=0.4.8"]
-examples = ["sentence-transformers>=5.0", "numpy>=2", "scikit-learn>=1.5"]
+examples = ["sentence-transformers>=5.0", "numpy>=2", "scikit-learn>=1.5", "threadpoolctl>=3", "opencv-python>=4.8"]
 ocr = ["rapidocr-onnxruntime>=1.4", "pypdfium2>=4.30"]
 api = ["fastapi>=0.115", "uvicorn[standard]>=0.32"]
 cli = ["typer>=0.15", "rich>=13"]
@@ -25,7 +25,11 @@ all = ["classifiles[laya,examples,ocr,api,cli]"]
 classifiles = "classifiles_cli.main:main"
 
 [dependency-groups]
-dev = ["pytest>=8", "httpx>=0.28"]
+dev = [
+    "pytest>=8",
+    "httpx>=0.28",
+    "mypy>=2.4.1",
+]
 
 [build-system]
 requires = ["hatchling"]
@@ -36,3 +40,30 @@ packages = ["src/classifiles", "src/classifiles_api", "src/classifiles_cli"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+ignore = [
+    "B008",    # typer options as default arguments are the typer way
+    "RUF001",  # ambiguous unicode: arrows and dashes in user-facing text are intended
+    "RUF002",
+    "RUF003",
+    "SIM108",  # ternaries are not always clearer
+    "B905",    # zip() over lists built together: strict= would only add noise
+    "SIM105",  # an explained try/except/pass reads as well as contextlib.suppress
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["classifiles", "classifiles_api", "classifiles_cli"]
+
+[tool.mypy]
+python_version = "3.12"
+files = ["src"]
+ignore_missing_imports = true
+check_untyped_defs = false
+warn_unused_ignores = true

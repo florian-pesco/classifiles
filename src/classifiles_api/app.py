@@ -102,9 +102,9 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
         try:
             return fn(*args, **kwargs)
         except KeyError as e:
-            raise HTTPException(404, str(e.args[0] if e.args else e))
+            raise HTTPException(404, str(e.args[0] if e.args else e)) from e
         except (ValueError, FileNotFoundError) as e:
-            raise HTTPException(400, str(e))
+            raise HTTPException(400, str(e)) from e
 
     def save():
         svc.settings.save(config_path)
@@ -164,7 +164,7 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
 
     @app.get("/api/rules")
     def get_rules():
-        return {"rules": svc.settings.rules, "kinds": sorted(KINDS) + ["other"]}
+        return {"rules": svc.settings.rules, "kinds": [*sorted(KINDS), "other"]}
 
     @app.put("/api/rules")
     def put_rules(req: RulesUpdate):
@@ -441,5 +441,6 @@ def _open_in_windows(path: Path, reveal: bool) -> None:
     proc = subprocess.Popen(["powershell.exe", "-NoProfile", "-NonInteractive", "-Command", _PS_OPEN],
                             stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                             cwd="/mnt/c", env=env)
+    assert proc.stdin is not None
     proc.stdin.write((win + "\n").encode("utf-8"))
     proc.stdin.close()

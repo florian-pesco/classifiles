@@ -14,7 +14,7 @@ from __future__ import annotations
 import os
 import random
 from collections import Counter, defaultdict
-from typing import Callable
+from collections.abc import Callable
 
 from .classifier import Classifier
 from .deciders import make_decider
@@ -212,7 +212,8 @@ def summarize(rows: list[dict], by_via: bool = False) -> dict:
         via = defaultdict(list)
         for r, ok in zip(rows, correct):
             via[r["via"]].append(ok)
-        out["by_decided_via"] = {k: {"files": len(v), "accuracy": round(sum(v) / len(v), 3)} for k, v in sorted(via.items())}
+        out["by_decided_via"] = {k: {"files": len(v), "accuracy": round(sum(v) / len(v), 3)}
+                                 for k, v in sorted(via.items())}
     return out
 
 
@@ -277,7 +278,8 @@ def evaluate_second_opinion(service, source: str = "folder", per_category: int =
     import time
 
     started = time.time()
-    with llm.LLMClient(service.settings.llm_model, service.settings.llm_gpu_fraction, service.settings.cpu_threads) as client:
+    s = service.settings
+    with llm.LLMClient(s.llm_model, s.llm_gpu_fraction, s.cpu_threads) as client:
         for i, c in enumerate(gated, 1):
             if progress:
                 progress("second opinion", i, len(gated))
@@ -287,14 +289,14 @@ def evaluate_second_opinion(service, source: str = "folder", per_category: int =
     seconds = (time.time() - started) / max(len(gated), 1)
 
     g_cases = [c for c in cases if "p_llm" in c]
-    agree = [c for c in g_cases if max(c["p_llm"], key=c["p_llm"].get) == c["pred"]]
-    disagree = [c for c in g_cases if max(c["p_llm"], key=c["p_llm"].get) != c["pred"]]
+    agree = [c for c in g_cases if max(c["p_llm"], key=c["p_llm"].__getitem__) == c["pred"]]
+    disagree = [c for c in g_cases if max(c["p_llm"], key=c["p_llm"].__getitem__) != c["pred"]]
     agreement = {
         "agree": len(agree),
         "agree_right": sum(c["pred"] == c["true"] for c in agree),
         "disagree": len(disagree),
         "disagree_example_right": sum(c["pred"] == c["true"] for c in disagree),
-        "disagree_llm_right": sum(max(c["p_llm"], key=c["p_llm"].get) == c["true"] for c in disagree),
+        "disagree_llm_right": sum(max(c["p_llm"], key=c["p_llm"].__getitem__) == c["true"] for c in disagree),
     }
     by_weight = {}
     for w in weights:
@@ -305,9 +307,9 @@ def evaluate_second_opinion(service, source: str = "folder", per_category: int =
                 if "p_llm" in c:
                     combined = llm.combine({a["folder"]: a["probability"] for a in c["alts"]}, c["p_llm"], w)
                     if mode == "blend":
-                        pred = max(combined, key=combined.get)
+                        pred = max(combined, key=combined.__getitem__)
                         conf = combined[pred]
-                    elif max(c["p_llm"], key=c["p_llm"].get) == c["pred"]:  # confirm: only when they agree
+                    elif max(c["p_llm"], key=c["p_llm"].__getitem__) == c["pred"]:  # confirm: only when they agree
                         conf = max(conf, combined[c["pred"]])
                 rows.append({"true": c["true"], "pred": pred, "confidence": conf, "gated": "p_llm" in c})
             by_weight[f"{mode} w={w}"] = _so_metrics(rows, threshold)
@@ -338,7 +340,6 @@ def evaluate_images(service, per_category: int = 40, seed: int = 0, split: str =
     """Held-out sorted *pictures*: text-only vs image-only vs blends. Each picture is hidden from
     both indexes (with split="folder": its whole folder). Aggregates only."""
     service.check_ready()
-    from pathlib import Path
 
     from .image_index import is_image
 
@@ -364,7 +365,8 @@ def evaluate_images(service, per_category: int = 40, seed: int = 0, split: str =
 
     def hide(rows, h):
         if split == "folder":
-            return {r["id"] for r in rows if r["category_key"] == h["key"] and os.path.dirname(r["relpath"]) == h["folder"]}
+            return {r["id"] for r in rows
+                    if r["category_key"] == h["key"] and os.path.dirname(r["relpath"]) == h["folder"]}
         return {r["id"] for r in rows if r["category_key"] == h["key"] and r["relpath"] == h["rel"]}
 
     allowed = {category_key(c) for c in cats}
@@ -392,7 +394,7 @@ def evaluate_images(service, per_category: int = 40, seed: int = 0, split: str =
             raw = {n: max(c["p_text"].get(n, 0.0), 1e-4) ** (1 - w) * max(c["p_img"].get(n, 0.0), 1e-4) ** w
                    for n in names}
             tot = sum(raw.values())
-            pred = max(raw, key=raw.get)
+            pred = max(raw, key=raw.__getitem__)
             rows.append({"true": c["true"], "pred": pred, "confidence": raw[pred] / tot, "top3": []})
             right += pred == c["true"]
         s = summarize(rows)
@@ -467,8 +469,9 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
         order = list(range(len(cases)))
         rng.shuffle(order)
         fold_of = {i: n % folds for n, i in enumerate(order)}
-        out = {"neighbours": [], "trained": [], **{f"blend {a}": [] for a in blends}}
-        C = T = None
+        out: dict[str, list[dict]] = {"neighbours": [], "trained": [], **{f"blend {a}": [] for a in blends}}
+        C: float | None = None
+        T = 1.0
         for f in range(folds):
             test = [i for i in range(len(cases)) if fold_of[i] == f]
             if not test:
@@ -505,14 +508,17 @@ def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tup
             if progress:
                 progress("reading files", i, len(holdout))
             cases.append({**h, "ev": service.read_file(h["path"], sources.get(h["path"])), "true": h["category"]})
+        def knn_folder(c):  # the neighbour vote hides all held-out files and this file's folder
+            return held | siblings.get(c["id"], set())
+
+        def train_folder(test):  # the trained model hides all held-out files and the folders of this fold
+            return held.union(*(siblings.get(c["id"], set()) for c in test))
+
         for split in splits:
             if split == "folder":
-                knn_ex = lambda c: held | siblings.get(c["id"], set())
-                train_ex = lambda test: held.union(*(siblings.get(c["id"], set()) for c in test))
+                result[f"{split} split"] = run(cases, knn_folder, train_folder, f"{split} split")
             else:
-                knn_ex = lambda c: held
-                train_ex = lambda test: held
-            result[f"{split} split"] = run(cases, knn_ex, train_ex, f"{split} split")
+                result[f"{split} split"] = run(cases, lambda c: held, lambda test: held, f"{split} split")
         result["files"] = len(holdout)
     if decisions:
         cases = _decision_cases(service)
