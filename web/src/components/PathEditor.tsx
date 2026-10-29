@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api'
+import { Icon } from './Icon'
 
 /**
  * Folder inside the chosen category, shown as clickable breadcrumbs:
@@ -102,9 +103,9 @@ export function PathDialog({ category, start, onCancel, onSave }: {
       {willCreate && value.trim() && <p className="small warn-text">Folders that don't exist yet will be created when you apply.</p>}
       <div className="shortcuts">
         <span className="small muted">{exists ? `In ${location}:` : `${location} doesn't exist yet`}</span>
-        {parent !== '' && <button className="chip" onClick={() => goTo(up)} title="One level up">⬑ up</button>}
+        {parent !== '' && <button className="chip" onClick={() => goTo(up)} title="One level up"><Icon name="undo" size={14} />up</button>}
         {matches.slice(0, 40).map(d => (
-          <button key={d} className="chip" onClick={() => goTo((parent ? `${parent}/` : '') + d)}>📁 {d}</button>
+          <button key={d} className="chip" onClick={() => goTo((parent ? `${parent}/` : '') + d)}><Icon name="folder" size={14} />{d}</button>
         ))}
         {exists && dirs.length === 0 && <span className="small muted">no subfolders</span>}
         {exists && dirs.length > 0 && matches.length === 0 && <span className="small muted">no folder starts with “{lastPart}”</span>}

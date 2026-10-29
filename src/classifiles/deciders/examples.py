@@ -32,7 +32,7 @@ class ExampleDecider:
         extras: the neighbours (for the folder suggestion) and the text/picture vectors (kept so the
         proposal can be re-scored later without reading the file again)."""
         if self.index.size == 0:
-            raise ValueError("The example index is empty. Build it first (Categories → Example index).")
+            raise ValueError("The example index is empty. Build it first (Categories → What the model learned → Build index).")
         vec = self.index.embedder.encode([query_text(ev)], query=True)[0]
         ivec = self._image_vector(ev)
         probs, reason, nbs = self.score(vec, ivec, categories, exclude_ids, image_exclude_ids)

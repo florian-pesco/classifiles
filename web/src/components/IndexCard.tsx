@@ -52,7 +52,7 @@ export function IndexCard({ active, notify, fail }: {
   return (
     <section className="card">
       <div className="section-head">
-        <h3>Example index</h3>
+        <h3>What the model learned</h3>
         {running
           ? <button onClick={cancel}>Cancel</button>
           : <button className={st.total ? '' : 'primary'} onClick={build}>{st.total ? 'Update index' : 'Build index'}</button>}
@@ -114,17 +114,26 @@ export function IndexCard({ active, notify, fail }: {
               : 'not listed yet. Update the index to also find inbox files that already exist in your folders.'}
         </p>
       )}
-      <ul className="simple-list">
-        {st.categories.filter(c => c.usable).map(c => (
-          <li key={c.name}>
-            <span className="grow">{c.name}</span>
-            <span className="small muted">
-              {c.examples} examples{c.learned ? ` + ${c.learned} learned` : ''}
-              {st.images?.per_category?.[c.name] ? ` · ${st.images.per_category[c.name]} pictures` : ''}
-            </span>
-          </li>
-        ))}
+      <ul className="bars">
+        {(() => {
+          const cats = st.categories.filter(c => c.usable)
+          const max = Math.max(1, ...cats.map(c => c.examples + c.learned))
+          return cats.map(c => (
+            <li key={c.name} title={`${c.examples} examples${c.learned ? ` + ${c.learned} learned from your decisions` : ''}`}>
+              <span className="bars-label">{c.name}</span>
+              <span className="bars-track">
+                <span className="bars-fill" style={{ width: `${(100 * c.examples) / max}%` }} />
+                {c.learned > 0 && <span className="bars-fill learned" style={{ width: `${(100 * c.learned) / max}%` }} />}
+              </span>
+              <span className="bars-value">
+                {c.examples.toLocaleString()}{c.learned ? ` +${c.learned}` : ''}
+                {st.images?.per_category?.[c.name] ? ` · ${st.images.per_category[c.name]} pics` : ''}
+              </span>
+            </li>
+          ))
+        })()}
       </ul>
+      <p className="small muted bars-legend"><span className="key" /> examples <span className="key learned" /> learned from your decisions</p>
     </section>
   )
 }
