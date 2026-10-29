@@ -8,7 +8,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .base import Evidence, kind_of
-from . import archive, image, office, pdf, text
+from . import archive, image, office, pdf, text, video
 
 log = logging.getLogger(__name__)
 
@@ -23,6 +23,7 @@ _EXTRACTORS = {
     "data": text.extract,
     "image": image.extract,
     "archive": archive.extract,
+    "video": video.extract,
 }
 
 

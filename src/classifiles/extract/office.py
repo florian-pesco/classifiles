@@ -3,6 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 
+def _created(props) -> dict:
+    """{"created": "YYYY-MM-DD"} from the document properties, if plausible."""
+    d = getattr(props, "created", None)
+    return {"created": d.date().isoformat()} if d is not None and d.year >= 1990 else {}
+
+
 def extract(path: Path, max_chars: int) -> tuple[str, dict]:
     ext = path.suffix.lower()
     if ext == ".docx":
@@ -18,7 +24,7 @@ def _docx(path: Path, max_chars: int) -> tuple[str, dict]:
     import docx
 
     d = docx.Document(str(path))
-    meta = {}
+    meta = _created(d.core_properties)
     if d.core_properties.title:
         meta["title"] = d.core_properties.title
     out, total = [], 0
@@ -35,7 +41,7 @@ def _xlsx(path: Path, max_chars: int) -> tuple[str, dict]:
     import openpyxl
 
     wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
-    meta = {"sheets": wb.sheetnames[:10]}
+    meta = {"sheets": wb.sheetnames[:10], **_created(wb.properties)}
     out, total = [], 0
     for ws in wb.worksheets[:3]:
         for row in ws.iter_rows(max_row=20, values_only=True):
@@ -54,7 +60,7 @@ def _pptx(path: Path, max_chars: int) -> tuple[str, dict]:
     from pptx import Presentation
 
     prs = Presentation(str(path))
-    meta = {"slides": len(prs.slides)}
+    meta = {"slides": len(prs.slides), **_created(prs.core_properties)}
     out, total = [], 0
     for slide in prs.slides:
         for shape in slide.shapes:

@@ -137,6 +137,62 @@ def build_prompt(ev, options: list[dict]) -> str:
     return "\n".join(lines)
 
 
+def ask_rotated(client, build, names: list[str], rotations: int, letters: list[str] | None = None) -> dict[str, float]:
+    """Ask once per rotation of the option order and average. Small models prefer certain letters
+    (often "A"), which would otherwise always favour the first option."""
+    letters = (letters or NAME_LETTERS)[:len(names)]
+    out = {n: 0.0 for n in names}
+    rotations = max(1, min(rotations, len(names)))
+    for r in range(rotations):
+        order = names[r:] + names[:r]
+        probs = client.choose(build(order), letters)
+        for n, letter in zip(order, letters):
+            out[n] += probs[letter] / rotations
+    return out
+
+
+# --- file names -------------------------------------------------------------------------
+
+NAME_LETTERS = ["A", "B", "C", "D", "E", "F"]
+OTHER = "Other"
+NONE = "None of these"
+
+
+def type_options(name: str, text: str, rule_type: str | None, k: int = 5) -> list[str]:
+    """Up to k document types worth asking about (best keyword scores, the rule's choice, a few
+    common ones), plus "Other"."""
+    from .naming import type_scores
+
+    ranked = [t for t, _ in sorted(type_scores(name, text).items(), key=lambda kv: -kv[1])]
+    opts = ([rule_type] if rule_type else []) + ranked
+    # fill up with common types (no keyword found: these are the usual suspects)
+    opts += ["Letter", "Contract", "Invoice", "Report", "Notes", "Form", "Certificate"]
+    uniq = list(dict.fromkeys(o for o in opts if o and o not in ("Screenshot", "Scan")))[:k]
+    return uniq + [OTHER]
+
+
+def build_type_prompt(ev, options: list[str]) -> str:
+    from .naming import TYPE_WORDS
+
+    lines = [f"File name: {ev.name}", f"Content (start): {ev.text[:CONTENT_CHARS]}", "",
+             "What kind of document is this?"]
+    for letter, opt in zip(NAME_LETTERS, options):
+        label = opt if opt == OTHER else f"{opt} ({TYPE_WORDS[opt][1]})" if TYPE_WORDS[opt][1] != opt else opt
+        lines.append(f"{letter}) {label if opt != OTHER else 'Something else'}")
+    lines += ["", f"Answer with one letter: {', '.join(NAME_LETTERS[:len(options)])}."]
+    return "\n".join(lines)
+
+
+def build_subject_prompt(ev, options: list[str], type_word: str | None) -> str:
+    lines = [f"File name: {ev.name}", f"Content (start): {ev.text[:CONTENT_CHARS]}", "",
+             f"This {type_word.lower() if type_word else 'document'} gets a new file name that starts with who it is "
+             "from or what it is about. Which fits best?"]
+    for letter, opt in zip(NAME_LETTERS, options):
+        lines.append(f"{letter}) {opt}")
+    lines += ["", f"Answer with one letter: {', '.join(NAME_LETTERS[:len(options)])}."]
+    return "\n".join(lines)
+
+
 def combine(p_examples: dict[str, float], p_llm: dict[str, float], weight: float) -> dict[str, float]:
     """Geometric blend over the candidates (both renormalised to the candidates first)."""
     names = list(p_llm)

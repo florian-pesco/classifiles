@@ -8,6 +8,7 @@ import { BatchPanel } from '../components/BatchPanel'
 import { BulkBar } from '../components/BulkBar'
 import { CategorySelect } from '../components/CategorySelect'
 import { CompareDuplicate } from '../components/CompareDuplicate'
+import { NameEditor } from '../components/NameEditor'
 import { PathEditor } from '../components/PathEditor'
 import { PathInput } from '../components/FolderPicker'
 import { Modal } from '../components/Modal'
@@ -206,17 +207,19 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   }
 
   // Optimistic review: update the row immediately, roll back if the server refuses.
-  const review = async (p: Proposal, action: ReviewAction, folder?: string, subpath?: string) => {
+  const review = async (p: Proposal, action: ReviewAction, folder?: string, subpath?: string,
+                        name?: string, useSuggestedName?: boolean) => {
     const optimistic: Proposal = {
       ...p,
       status: action === 'accept' ? 'accepted' : action === 'reject' ? 'rejected'
         : (p.target && p.confidence >= (scan?.threshold ?? settings.threshold) ? 'suggested' : 'needs_review'),
       final_target: action === 'accept' ? (folder ?? p.final_target) : action === 'reset' ? p.target : p.final_target,
       subpath: subpath !== undefined ? subpath : action === 'reset' ? p.suggested_subpath : p.subpath,
+      new_name: useSuggestedName === true ? p.suggested_name : useSuggestedName === false ? null : p.new_name,
     }
     setProposals(ps => ps.map(x => (x.id === p.id ? optimistic : x)))
     try {
-      const { relearned_others: others, ...saved } = await api.review(p.id, action, folder, subpath)
+      const { relearned_others: others, ...saved } = await api.review(p.id, action, folder, subpath, name, useSuggestedName)
       merge([saved, ...others])
       reportRelearned(others)
     } catch (e) {
@@ -225,14 +228,15 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     }
   }
 
-  const bulk = async (action: ReviewAction, folder?: string, subpath?: string) => {
+  const bulk = async (action: ReviewAction, folder?: string, subpath?: string, useSuggestedName?: boolean) => {
     const ids = selectedRows.filter(p => p.status !== 'moved').map(p => p.id)
     if (!ids.length) return
     setBusy(true)
     try {
-      const res = await api.bulkReview(ids, action, folder, subpath)
+      const res = await api.bulkReview(ids, action, folder, subpath, useSuggestedName)
       merge([...res.updated, ...res.relearned])
-      const verb = action === 'accept' ? 'Accepted' : action === 'reject' ? 'Kept in inbox:' : 'Reset'
+      const verb = useSuggestedName === true ? 'Suggested names for' : useSuggestedName === false ? 'Original names for'
+        : action === 'accept' ? 'Accepted' : action === 'reject' ? 'Kept in inbox:' : 'Reset'
       notify(`${verb} ${res.updated.length} file${res.updated.length === 1 ? '' : 's'}`
         + (res.errors.length ? `; ${res.errors.length} failed (${res.errors[0].error})` : '')
         + (res.relearned.filter(p => p.relearned).length
@@ -297,20 +301,22 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             {running ? 'Scanning…' : 'Scan & classify'}
           </button>
         </div>
-        {running && scan?.phase === 'second_opinion' && (
+        {running && (scan?.phase === 'second_opinion' || scan?.phase === 'naming') && (
           <div className="row-form so-progress">
             <div className="progress grow" role="progressbar" aria-valuenow={scan.llm_done} aria-valuemax={scan.llm_total}>
               <div style={{ width: `${scan.llm_total ? (100 * scan.llm_done) / scan.llm_total : 0}%` }} />
               <span>
                 {scan.llm_done === 0 ? 'Starting the language model (first time: one-time download)…'
-                  : `Second opinion on unsure files: ${scan.llm_done} / ${scan.llm_total}`}
+                  : scan.phase === 'naming'
+                    ? `Choosing file names: ${scan.llm_done} / ${scan.llm_total}`
+                    : `Second opinion on unsure files: ${scan.llm_done} / ${scan.llm_total}`}
               </span>
             </div>
             <button onClick={() => api.cancelSecondOpinion().catch(fail)}>Skip</button>
           </div>
         )}
-        {scan?.llm_error && <div className="banner error">Second opinion stopped: {scan.llm_error}</div>}
-        {running && scan && scan.phase !== 'second_opinion' && (
+        {scan?.llm_error && <div className="banner error">Language model stopped: {scan.llm_error}</div>}
+        {running && scan && scan.phase !== 'second_opinion' && scan.phase !== 'naming' && (
           <div className="progress" role="progressbar" aria-valuenow={scan.processed} aria-valuemax={scan.total}>
             <div style={{ width: `${scan.total ? (100 * scan.processed) / scan.total : 0}%` }} />
             <span>{scan.processed} / {scan.total} files
@@ -434,6 +440,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
                   <span className="mono">{m.src.split('/').pop()}</span>
                 </span>
                 <span className="muted mono small">{m.error ?? `→ ${m.dst}`}</span>
+                {m.renamed && m.dst && <span className="small">renamed to <span className="mono">{m.dst.split('/').pop()}</span></span>}
                 {m.creates && <span className="small warn-text">creates new folder <span className="mono">{m.creates}</span></span>}
               </li>
             ))}
@@ -456,7 +463,8 @@ function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, o
   threshold: number
   selected: boolean
   onSelect: (shift: boolean) => void
-  onReview: (p: Proposal, action: ReviewAction, folder?: string, subpath?: string) => void
+  onReview: (p: Proposal, action: ReviewAction, folder?: string, subpath?: string,
+             name?: string, useSuggestedName?: boolean) => void
   onPreview: () => void
   onCompare: () => void
 }) {
@@ -502,6 +510,9 @@ function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, o
         {open && (
           <div className="details small">
             {p.reason && <div><b>Why:</b> {p.reason}</div>}
+            {p.name_reason && p.suggested_name && (
+              <div><b>Name:</b> <span className="mono">{p.suggested_name}</span>, because: {p.name_reason}</div>
+            )}
             {p.alternatives.length > 0 && (
               <div><b>Scores:</b> {p.alternatives.map(a => `${a.folder} ${(a.probability * 100).toFixed(0)}%`).join(' · ')}</div>
             )}
@@ -536,6 +547,13 @@ function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, o
         <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
                     newFolder={p.new_folder} disabled={done}
                     onChange={sub => onReview(p, 'accept', p.final_target ?? undefined, sub)} />
+      )}
+      {cat && cat.source !== 'delete' && !p.duplicate_of && (p.suggested_name || p.new_name) && (
+        <NameEditor original={p.name} suggested={p.suggested_name} current={p.new_name} reason={p.name_reason}
+                    disabled={done}
+                    onUse={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, true)}
+                    onKeep={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, false)}
+                    onSet={n => onReview(p, 'accept', p.final_target ?? undefined, undefined, n)} />
       )}
 
       <div className="rowbtns">

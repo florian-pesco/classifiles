@@ -21,6 +21,12 @@ def extract(path: Path, max_chars: int, ocr_pages: int = 0) -> tuple[str, dict]:
         meta["title"] = str(info["/Title"])
     if info.get("/Author"):
         meta["author"] = str(info["/Author"])
+    try:
+        created = reader.metadata.creation_date if reader.metadata else None
+    except Exception:  # noqa: BLE001 - malformed date strings are common
+        created = None
+    if created and 1990 <= created.year:
+        meta["created"] = created.date().isoformat()
     chunks, total = [], 0
     for page in reader.pages[:3]:
         t = page.extract_text() or ""

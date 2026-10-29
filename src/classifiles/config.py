@@ -82,6 +82,14 @@ class Settings:
     image_model: str = "google/siglip2-base-patch16-224"
     images_per_category: int = 300
     image_weight: float = 0.5           # 0 = text only, 1 = image similarity only (for images)
+    # Suggested file names (naming.py): <Subject>_<Type>_<Detail>, for documents, scans and screenshots.
+    name_suggestions: bool = True
+    name_llm: bool = False              # the local language model picks type and subject (scan step)
+    use_suggested_names: bool = False   # apply suggested names unless "keep original" is chosen
+    name_transliterate: bool = True     # ä -> ae etc. in suggested names
+    name_media: bool = True             # photos and videos too: <original core>_<Title>
+    name_media_labels: bool = True      # title from what the picture shows (labels.py, local picture model)
+    name_media_place: bool = True       # title from the GPS town (places.py; town list downloaded once)
     # Trained classifier (trained.py) mixed with the similar-files vote: 0 = similar files only.
     trained_weight: float = 0.5
     # Learn from my decisions: after each decision in Review, undecided files of the same scan are

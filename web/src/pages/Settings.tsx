@@ -30,6 +30,13 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
   const [useSource, setUseSource] = useState(settings.use_download_source)
   const [secondOpinion, setSecondOpinion] = useState(settings.second_opinion)
   const [relearn, setRelearn] = useState(settings.relearn_in_scan)
+  const [names, setNames] = useState(settings.name_suggestions)
+  const [namesLlm, setNamesLlm] = useState(settings.name_llm)
+  const [namesDefault, setNamesDefault] = useState(settings.use_suggested_names)
+  const [translit, setTranslit] = useState(settings.name_transliterate)
+  const [media, setMedia] = useState(settings.name_media)
+  const [mediaLabels, setMediaLabels] = useState(settings.name_media_labels)
+  const [mediaPlace, setMediaPlace] = useState(settings.name_media_place)
   const [images, setImages] = useState(settings.image_similarity)
   const [imageWeight, setImageWeight] = useState(settings.image_weight)
   const [trainedWeight, setTrainedWeight] = useState(settings.trained_weight)
@@ -56,6 +63,13 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         ocr_images: ocrImages,
         use_download_source: useSource,
         second_opinion: secondOpinion,
+        name_suggestions: names,
+        name_llm: namesLlm,
+        use_suggested_names: namesDefault,
+        name_transliterate: translit,
+        name_media: media,
+        name_media_labels: mediaLabels,
+        name_media_place: mediaPlace,
         relearn_in_scan: relearn,
         image_similarity: images,
         image_weight: imageWeight,
@@ -189,6 +203,51 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <label className="check field-check">
           <input type="checkbox" checked={relearn} onChange={e => setRelearn(e.target.checked)} />
           Update the other suggestions after each decision (needs "Learn from my folders")
+        </label>
+      </section>
+
+      <section className="card">
+        <h3>File names</h3>
+        <p className="muted small">
+          Documents, scans and screenshots get a suggested name: <span className="mono">Subject_Type_Detail</span>,
+          e.g. <span className="mono">Telekom_Invoice_2025-03.pdf</span> or <span className="mono">Econ1_Slides_Ch03.pdf</span>.
+          The subject comes from the folder, the sender in the text or the original name; the detail is the document's
+          date or a number like a chapter. Photos, videos, archives and code keep their names. Nothing is renamed until
+          you choose a name and apply; undo restores the original name.
+        </p>
+        <label className="check field-check">
+          <input type="checkbox" checked={names} onChange={e => setNames(e.target.checked)} />
+          Suggest file names
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={namesDefault} disabled={!names} onChange={e => setNamesDefault(e.target.checked)} />
+          Use the suggested name by default (otherwise the original name is kept unless you choose the suggestion)
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={translit} disabled={!names} onChange={e => setTranslit(e.target.checked)} />
+          Write umlauts as ae / oe / ue / ss (safer in links and scripts)
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={namesLlm} disabled={!names} onChange={e => setNamesLlm(e.target.checked)} />
+          Let the local language model pick the type and subject for documents with text (uses the model chosen
+          under Second opinion; runs during that step of a scan, ~1 s per file)
+        </label>
+        <p className="muted small" style={{ marginTop: 14 }}>
+          Photos and videos keep their original name as the core (cleaned up) and get a short title, e.g.{' '}
+          <span className="mono">IMG_20250314_103344_Strand_Barcelona.jpg</span>. The title comes from the topic
+          folder, what the picture shows, the town where it was taken, or the app it came from (only if nothing else).
+        </p>
+        <label className="check field-check">
+          <input type="checkbox" checked={media} disabled={!names} onChange={e => setMedia(e.target.checked)} />
+          Photos and videos too
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={mediaLabels} disabled={!names || !media} onChange={e => setMediaLabels(e.target.checked)} />
+          Recognise what pictures show (the local picture model; videos: a frame from the middle)
+        </label>
+        <label className="check field-check">
+          <input type="checkbox" checked={mediaPlace} disabled={!names || !media} onChange={e => setMediaPlace(e.target.checked)} />
+          Add the town from GPS (an offline list of towns is downloaded once, ~3 MB; coordinates never leave this PC)
         </label>
       </section>
 

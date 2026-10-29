@@ -28,6 +28,8 @@ class ReviewRequest(BaseModel):
     action: str  # accept | reject | reset
     folder: str | None = None
     subpath: str | None = None  # folder inside the category; "" = top level; None = keep/suggest
+    name: str | None = None  # new file name; "" = keep the original; None = unchanged
+    use_suggested_name: bool | None = None
 
 
 class BulkReviewRequest(BaseModel):
@@ -35,6 +37,7 @@ class BulkReviewRequest(BaseModel):
     action: str  # accept | reject | reset
     folder: str | None = None
     subpath: str | None = None
+    use_suggested_name: bool | None = None  # True: use the suggested names; False: keep the originals
 
 
 class SettingsPatch(BaseModel):
@@ -61,6 +64,13 @@ class SettingsPatch(BaseModel):
     llm_max_files: int | None = None
     relearn_in_scan: bool | None = None
     trained_weight: float | None = None
+    name_suggestions: bool | None = None
+    name_llm: bool | None = None
+    use_suggested_names: bool | None = None
+    name_transliterate: bool | None = None
+    name_media: bool | None = None
+    name_media_labels: bool | None = None
+    name_media_place: bool | None = None
 
 
 class CategoriesUpdate(BaseModel):
@@ -266,14 +276,14 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     def review(proposal_id: int, req: ReviewRequest):
         """The reviewed proposal, plus `relearned_others`: other proposals of the scan that changed
         because of this decision (learn from my decisions)."""
-        p = guard(svc.review, proposal_id, req.action, req.folder, req.subpath)
+        p = guard(svc.review, proposal_id, req.action, req.folder, req.subpath, req.name, req.use_suggested_name)
         return {**p, "relearned_others": _strip(svc.relearn(p["scan_id"]))}
 
     @app.post("/api/proposals/bulk")
     def bulk_review(req: BulkReviewRequest):
         if req.action not in ("accept", "reject", "reset"):
             raise HTTPException(400, "action must be accept, reject or reset")
-        out = svc.bulk_review(req.ids, req.action, req.folder, req.subpath)
+        out = svc.bulk_review(req.ids, req.action, req.folder, req.subpath, req.use_suggested_name)
         scans = {p["scan_id"] for p in out["updated"]}
         out["relearned"] = _strip([c for s in scans for c in svc.relearn(s)])
         _strip(out["updated"])
