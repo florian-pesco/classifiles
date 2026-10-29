@@ -41,6 +41,11 @@ class Evidence:
     text: str = ""
     meta: dict = field(default_factory=dict)
 
+    @classmethod
+    def from_dict(cls, d: dict) -> Evidence:
+        """Evidence from its stored form (to_dict); unknown keys are ignored."""
+        return cls(**{k: v for k, v in d.items() if k in cls.__dataclass_fields__})
+
     def to_state(self) -> str:
         """Plain-text description of the file for the decision model."""
         lines = [f"Filename: {self.name}", f"File type: {self.kind} ({self.ext or 'no extension'})",

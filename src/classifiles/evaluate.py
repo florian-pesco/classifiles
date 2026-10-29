@@ -112,6 +112,34 @@ def decided_proposals(service) -> list[dict]:
         WHERE p.status IN ('accepted', 'moved') AND p.source != 'rule' AND p.final_target IS NOT NULL""")
 
 
+def own_examples(service, rows: list[dict]) -> dict[int, set[int]]:
+    """Per decided proposal, the ids of the examples that are this very file: the scanned example
+    at its new place, and the learned example (trashed files are learned under Delete). Hiding
+    them keeps a re-run from seeing its own answer."""
+    from .service import _learned_key
+
+    examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
+                                   (service.settings.embedding_model,))
+    by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
+               for e in examples if e["origin"] == "scan"}
+    by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
+    out: dict[int, set[int]] = {}
+    for r in rows:
+        own = set()
+        if r["dst"]:
+            if os.path.normpath(r["dst"]) in by_path:
+                own.add(by_path[os.path.normpath(r["dst"])])
+            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
+            if learned:
+                own.add(learned)
+        out[r["id"]] = own
+    return out
+
+
+def _evidence(r: dict) -> Evidence:
+    return Evidence.from_dict(r["evidence"])
+
+
 def evaluate_decisions(service, rerun: bool = True) -> dict:
     """How right were proposals, measured against your actual decisions.
 
@@ -130,27 +158,9 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
 
     if rerun and rows:
         service.check_ready()
-        # hide each applied file from the index, both as scanned example (by its new path) and as
-        # learned example (by its learned key; trashed files are learned under Delete)
-        from .service import _learned_key
-
-        examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
-                                       (service.settings.embedding_model,))
-        by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
-                   for e in examples if e["origin"] == "scan"}
-        by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
-        hide = set()
-        for r in rows:
-            if not r["dst"]:
-                continue
-            if os.path.normpath(r["dst"]) in by_path:
-                hide.add(by_path[os.path.normpath(r["dst"])])
-            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
-            if learned:
-                hide.add(learned)
+        hide = set().union(*own_examples(service, rows).values())  # every decided file, hidden at once
         clf = Classifier(service.categories(), ExampleDecider(service.example_index()))
         clf.decider_kwargs = {"exclude_ids": hide}
-        fields = Evidence.__dataclass_fields__
         # decisions scanned before the download source existed: look it up at the file's new place
         # (the Windows note moves with the file within a drive)
         sources = {}
@@ -161,7 +171,7 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
             sources = {str(p): d for p, d in download_sources(moved).items()}
         current = []
         for r in rows:
-            ev = Evidence(**{k: v for k, v in r["evidence"].items() if k in fields})
+            ev = _evidence(r)
             if r["dst"] and str(r["dst"]) in sources and not ev.meta.get("source"):
                 ev.meta = {**ev.meta, "source": sources[str(r["dst"])]}
             c = clf.classify(ev)
@@ -232,24 +242,9 @@ def _cases_heldout(service, per_category: int, seed: int, split: str) -> list[di
 
 
 def _cases_decisions(service) -> list[dict]:
-    from .service import _learned_key
-
     rows = decided_proposals(service)
-    examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
-                                   (service.settings.embedding_model,))
-    by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
-               for e in examples if e["origin"] == "scan"}
-    by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
-    hide = set()
-    for r in rows:
-        if r["dst"]:
-            if os.path.normpath(r["dst"]) in by_path:
-                hide.add(by_path[os.path.normpath(r["dst"])])
-            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
-            if learned:
-                hide.add(learned)
-    fields = Evidence.__dataclass_fields__
-    return [{"ev": Evidence(**{k: v for k, v in r["evidence"].items() if k in fields}), "true": r["final_target"],
+    hide = set().union(*own_examples(service, rows).values())
+    return [{"ev": _evidence(r), "true": r["final_target"],
              "exclude": hide} for r in rows]
 
 
@@ -411,28 +406,10 @@ BLENDS = (0.25, 0.5, 0.75)
 def _decision_cases(service) -> list[dict]:
     """Real decisions with the example ids that are this file (as scanned example at its new place,
     and as learned example), so a fold can leave exactly those out of training."""
-    from .service import _learned_key
-
     # duplicates are decided by being identical to another file, not by what they are about
     rows = [r for r in decided_proposals(service) if r["source"] != "duplicate"]
-    examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
-                                   (service.settings.embedding_model,))
-    by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
-               for e in examples if e["origin"] == "scan"}
-    by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
-    fields = Evidence.__dataclass_fields__
-    cases = []
-    for r in rows:
-        own = set()
-        if r["dst"]:
-            if os.path.normpath(r["dst"]) in by_path:
-                own.add(by_path[os.path.normpath(r["dst"])])
-            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
-            if learned:
-                own.add(learned)
-        cases.append({"ev": Evidence(**{k: v for k, v in r["evidence"].items() if k in fields}),
-                      "true": r["final_target"], "own": own})
-    return cases
+    own = own_examples(service, rows)
+    return [{"ev": _evidence(r), "true": r["final_target"], "own": own[r["id"]]} for r in rows]
 
 
 def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tuple[str, ...] = SPLITS,

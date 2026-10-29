@@ -533,12 +533,11 @@ class ClassifilesService:
         usable evidence and at least two candidate categories; at most llm_max_files."""
         from .extract.base import Evidence
 
-        fields = Evidence.__dataclass_fields__
         out = []
         for p in sorted(proposals, key=lambda p: p["confidence"]):
             if p["source"] != "examples" or p["confidence"] >= threshold or p["status"] not in ("needs_review",):
                 continue
-            ev = Evidence(**{k: v for k, v in p["evidence"].items() if k in fields})
+            ev = Evidence.from_dict(p["evidence"])
             if len(llm.candidates(p["alternatives"])) < 2 or not llm.has_evidence(ev):
                 continue
             out.append({**p, "_ev": ev})
@@ -730,7 +729,7 @@ class ClassifilesService:
         from .extract.base import Evidence
 
         ev_d = p["evidence"]
-        ev = Evidence(**{k: v for k, v in ev_d.items() if k in Evidence.__dataclass_fields__})
+        ev = Evidence.from_dict(ev_d)
         rule_type, _ = naming.detect_type(p["name"], ev.text)
         types = llm.type_options(p["name"], ev.text, rule_type)
         p_type = llm.ask_rotated(client, lambda order: llm.build_type_prompt(ev, order), types,
