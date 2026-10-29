@@ -68,6 +68,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [inbox, setInbox] = useState(settings.inboxes[0] ?? '')
   const [maxFiles, setMaxFiles] = useState(settings.max_files ? String(settings.max_files) : '')
   const [onlyNew, setOnlyNew] = useState(false)
+  const [scanForm, setScanForm] = useState(false) // full scan options open (always open before the first scan)
   const [plan, setPlan] = useState<PlannedMove[] | null>(null)
   const [preview, setPreview] = useState<Proposal | null>(null)
   // Compare session: the duplicates to go through, fixed when the window opens (so decisions made
@@ -309,18 +310,32 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       </PageHead>
 
       <section className="card scan-card">
-        <div className="scanbar">
-          <PathInput value={inbox} onChange={setInbox} label="Inbox folder" placeholder="Inbox folder to scan" />
-          <input className="limit" type="number" min={1} value={maxFiles} placeholder="all"
-                 onChange={e => setMaxFiles(e.target.value)} aria-label="Maximum number of files"
-                 title="Classify at most this many files (newest first). Empty = all." />
-          <label className="check" title="Skip files already classified in an earlier scan">
-            <input type="checkbox" checked={onlyNew} onChange={e => setOnlyNew(e.target.checked)} /> Only new
-          </label>
-          <button className="primary" onClick={startScan} disabled={running}>
-            <Icon name="scan" size={16} />{running ? 'Scanning…' : 'Scan & classify'}
-          </button>
-        </div>
+        {scanForm || scans.length === 0 ? (
+          <div className="scanbar">
+            <PathInput value={inbox} onChange={setInbox} label="Inbox folder" placeholder="Inbox folder to scan" />
+            <input className="limit" type="number" min={1} value={maxFiles} placeholder="all"
+                   onChange={e => setMaxFiles(e.target.value)} aria-label="Maximum number of files"
+                   title="Classify at most this many files (newest first). Empty = all." />
+            <label className="check" title="Skip files already classified in an earlier scan">
+              <input type="checkbox" checked={onlyNew} onChange={e => setOnlyNew(e.target.checked)} /> Only new
+            </label>
+            <button className="primary" onClick={() => { setScanForm(false); startScan() }} disabled={running}>
+              <Icon name="scan" size={16} />{running ? 'Scanning…' : 'Scan & classify'}
+            </button>
+          </div>
+        ) : (
+          <div className="scanbar compact">
+            <Icon name="inbox" className="muted" />
+            <span className="grow scan-summary" title={inbox}>
+              <b>{inbox.split('/').filter(Boolean).pop() || 'Inbox'}</b>
+              <span className="muted small"> {maxFiles ? `· newest ${maxFiles}` : '· all files'}{onlyNew ? ' · only new' : ''}</span>
+            </span>
+            <button className="ghost" onClick={() => setScanForm(true)}>Change</button>
+            <button className="primary" onClick={startScan} disabled={running}>
+              <Icon name="scan" size={16} />{running ? 'Scanning…' : 'Scan & classify'}
+            </button>
+          </div>
+        )}
         {running && (scan?.phase === 'second_opinion' || scan?.phase === 'naming') && (
           <div className="row-form so-progress">
             <div className="progress grow" role="progressbar" aria-valuenow={scan.llm_done} aria-valuemax={scan.llm_total}>
@@ -421,12 +436,12 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
           <button onClick={() => acceptSuggested()} disabled={!counts.suggested}>
             <Icon name="check" size={16} />Accept all suggested ({counts.suggested ?? 0})
           </button>
-          <button onClick={() => acceptSuggested(true)} disabled={!counts.suggested}
+          <button className="hide-m" onClick={() => acceptSuggested(true)} disabled={!counts.suggested}
                   title="Accept the suggested categories, but put the files directly into the category folders">
             … category only
           </button>
           <span className="grow" />
-          <button className="ghost" onClick={undoLast}><Icon name="undo" size={16} />Undo last apply</button>
+          <button className="ghost" onClick={undoLast} title="Undo last apply"><Icon name="undo" size={16} /><span className="hide-m">Undo last apply</span></button>
           <button className="primary" onClick={openPlan} disabled={!counts.accepted}>
             Apply accepted ({counts.accepted ?? 0})<Icon name="chevron" size={16} />
           </button>

@@ -84,86 +84,91 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
     return [...g.entries()].sort(([a], [b]) => (a === 'Manual categories' ? 1 : b === 'Manual categories' ? -1 : a.localeCompare(b)))
   }, [rows])
 
+  const enabled = rows.filter(r => r.enabled).length
+
   return (
     <div className="page">
-      <PageHead title="Categories" lead="The places files can go, and what the model has learned about them." />
-      <section className="card explain">
-        <h2>Categories</h2>
+      <PageHead title="Categories" lead={`${enabled} of ${rows.length} folders are offered as categories. Files go into them, or into Delete.`}>
+        <button onClick={() => setPicker('root')}><Icon name="folder" size={16} />Add root</button>
+        <button onClick={() => setPicker('manual')}><Icon name="layers" size={16} />Add folder</button>
+        <button className="ghost" onClick={reload} disabled={dirty} title="Re-read folders from disk"><Icon name="learn" size={16} />Re-read</button>
+      </PageHead>
+
+      <details className="card explain fold">
+        <summary><Icon name="chevron" size={15} />How categories work</summary>
         <p>
-          Categories are the places files can go. Every subfolder of a <b>root</b> becomes a category
-          automatically. You can also add any other folder as a <b>manual</b> category. For each one you
-          can switch it <b>off</b> (never offered), choose <b>move</b> or <b>copy</b> (copy keeps the
-          original in the inbox), and add a short <b>description</b>. Descriptions are optional with
-          "Learn from my folders"; with Laya they are essential (about {WORD_LIMIT} words, Laya reads
-          little more).
+          Every subfolder of a <b>root</b> becomes a category automatically; any other folder can be added as a
+          <b> manual</b> category. Switch a category <b>off</b> to never offer it, choose <b>move</b> or <b>copy</b>
+          (copy keeps the original in the inbox), and optionally describe what belongs there. Descriptions are optional
+          with "Learn from my folders"; with Laya they are essential (about {WORD_LIMIT} words).
         </p>
-      </section>
+      </details>
 
       <section className="card">
-        <div className="section-head">
-          <h3>Roots</h3>
-          <button onClick={() => setPicker('root')}>+ Add root</button>
-        </div>
+        <div className="section-head"><h3>Roots</h3></div>
         {roots.length === 0 && <p className="muted small">No roots yet. Add the folder that holds your category folders.</p>}
-        <ul className="simple-list">
+        <div className="root-chips">
           {roots.map(r => (
-            <li key={r.path}>
-              <Icon name="folder" className="muted" />
-              <span className="mono grow">{r.path}</span>
-              <button className="icon no" title="Remove root" onClick={() => {
+            <span key={r.path} className="root-chip" title={r.path}>
+              <Icon name="folder" size={15} />
+              <span className="mono">{r.path}</span>
+              <button className="ghost icon-s" title="Remove root" aria-label={`Remove root ${r.path}`} onClick={() => {
                 setRoots(rs => rs.filter(x => x.path !== r.path)); setDirty(true)
-              }}><Icon name="x" /></button>
-            </li>
+              }}><Icon name="x" size={14} /></button>
+            </span>
           ))}
-        </ul>
+        </div>
         {dirty && roots.some(r => !rows.some(x => x.root === r.path)) && (
-          <p className="muted small">Save to load the subfolders of new roots.</p>
+          <p className="muted small" style={{ marginTop: 10 }}>Save to load the subfolders of new roots.</p>
         )}
       </section>
 
       <IndexCard active={examplesActive} notify={notify} fail={fail} />
 
       {grouped.map(([group, items]) => (
-        <section className="card" key={group}>
-          <div className="section-head">
-            <h3 className={group === 'Manual categories' ? '' : 'mono'}>{group}</h3>
-            {group === 'Manual categories' && <button onClick={() => setPicker('manual')}>+ Add folder</button>}
+        <section key={group} className="cat-section">
+          <div className="cat-section-head">
+            <h2 className={group === 'Manual categories' ? '' : 'mono-title'} title={group}>
+              {group === 'Manual categories' ? group : group.split('/').filter(Boolean).pop()}
+            </h2>
+            <span className="muted small">{items.filter(r => r.enabled).length} of {items.length} on</span>
           </div>
-          <div className="cat-table">
+          <div className="cat-grid">
             {items.map(r => {
               const n = words(r.description)
               return (
-                <div key={r.path} className={`cat-row${r.enabled ? '' : ' off'}`}>
-                  <label className="check" title={r.enabled ? 'Offered as category' : 'Not offered'}>
-                    <input type="checkbox" checked={r.enabled} onChange={e => edit(r.path, { enabled: e.target.checked })} />
-                  </label>
-                  <div className="cat-name">
-                    {r.source === 'manual'
-                      ? <input value={r.name} placeholder={r.path.split('/').pop()} aria-label="Category name"
-                               onChange={e => edit(r.path, { name: e.target.value })} />
-                      : <b>{r.label}</b>}
-                    {r.source === 'manual' && <div className="muted small mono">{r.path}</div>}
-                    {!r.exists && <div className="warn-text small">folder missing</div>}
-                  </div>
-                  <div className="cat-desc">
-                    <input value={r.description} aria-label={`Description for ${r.label}`}
-                           placeholder={r.samples.length ? `e.g. ${r.samples.join(', ')}` : 'what belongs here?'}
-                           onChange={e => edit(r.path, { description: e.target.value })} />
-                    <span className={`small ${n > WORD_LIMIT ? 'warn-text' : 'muted'}`}>
-                      {n === 0 ? 'no description: the model only sees the folder name' : `${n} words`}
-                      {n > WORD_LIMIT ? ` (the model may not read past ~${WORD_LIMIT})` : ''}
-                    </span>
-                  </div>
-                  <select value={r.action} onChange={e => edit(r.path, { action: e.target.value as 'move' | 'copy' })}
-                          aria-label={`Action for ${r.label}`}>
-                    <option value="move">move</option>
-                    <option value="copy">copy</option>
-                  </select>
-                  {r.source === 'manual'
-                    ? <button className="icon no" title="Remove category" onClick={() => {
+                <div key={r.path} className={`cat-card${r.enabled ? '' : ' off'}`}>
+                  <div className="cat-card-head">
+                    <input type="checkbox" className="switch" checked={r.enabled} aria-label={`Offer ${r.label}`}
+                           title={r.enabled ? 'Offered as category' : 'Not offered'}
+                           onChange={e => edit(r.path, { enabled: e.target.checked })} />
+                    <div className="cat-name">
+                      {r.source === 'manual'
+                        ? <input value={r.name} placeholder={r.path.split('/').pop()} aria-label="Category name"
+                                 onChange={e => edit(r.path, { name: e.target.value })} />
+                        : <b>{r.label}</b>}
+                      {r.source === 'manual' && <span className="muted small mono">{r.path}</span>}
+                      {!r.exists && <span className="warn-text small">folder missing</span>}
+                    </div>
+                    <div className="seg seg-s" role="group" aria-label={`Action for ${r.label}`}>
+                      {(['move', 'copy'] as const).map(a => (
+                        <button key={a} className={r.action === a ? 'active' : ''} onClick={() => edit(r.path, { action: a })}
+                                aria-pressed={r.action === a}>{a}</button>
+                      ))}
+                    </div>
+                    {r.source === 'manual' && (
+                      <button className="ghost icon-s" title="Remove category" aria-label={`Remove ${r.label}`} onClick={() => {
                         setRows(rs => rs.filter(x => x.path !== r.path)); setDirty(true)
-                      }}><Icon name="x" /></button>
-                    : <span />}
+                      }}><Icon name="x" size={14} /></button>
+                    )}
+                  </div>
+                  <input value={r.description} aria-label={`Description for ${r.label}`}
+                         placeholder={r.samples.length ? `e.g. ${r.samples.join(', ')}` : 'What belongs here? (optional)'}
+                         onChange={e => edit(r.path, { description: e.target.value })} />
+                  <span className={`small ${n > WORD_LIMIT ? 'warn-text' : 'muted'}`}>
+                    {n === 0 ? 'No description' : `${n} words`}
+                    {n > WORD_LIMIT ? ` (Laya reads about ${WORD_LIMIT})` : ''}
+                  </span>
                 </div>
               )
             })}
@@ -171,46 +176,41 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
         </section>
       ))}
       {!grouped.some(([g]) => g === 'Manual categories') && (
-        <section className="card">
-          <div className="section-head">
-            <h3>Manual categories</h3>
-            <button onClick={() => setPicker('manual')}>+ Add folder</button>
-          </div>
-          <p className="muted small">Any folder outside your roots, e.g. on another drive.</p>
+        <section className="cat-section">
+          <div className="cat-section-head"><h2>Manual categories</h2></div>
+          <button className="cat-card add-card" onClick={() => setPicker('manual')}>
+            <Icon name="layers" size={18} />Add any folder outside your roots, e.g. on another drive
+          </button>
         </section>
       )}
 
-      <section className="card">
-        <h3>Delete</h3>
-        <p className="muted small">
-          A built-in category for junk. "Deleted" files first go to a hidden <code>.classifiles-trash</code> folder
-          inside the inbox. That can be undone until you empty the trash (History page).
-        </p>
-        <div className="cat-row">
-          <label className="check">
-            <input type="checkbox" checked={del.enabled} onChange={e => { setDel({ ...del, enabled: e.target.checked }); setDirty(true) }} />
-          </label>
-          <div className="cat-name"><b>Delete</b></div>
-          <div className="cat-desc">
-            <input value={del.description} placeholder="junk: installers, temporary or generated files, duplicates"
-                   onChange={e => { setDel({ ...del, description: e.target.value }); setDirty(true) }} aria-label="Delete description" />
-            <label className="check small" title="Otherwise only rules and your manual choice send files to Delete">
-              <input type="checkbox" checked={del.suggest} onChange={e => { setDel({ ...del, suggest: e.target.checked }); setDirty(true) }} />
-              Let the model suggest Delete (otherwise only rules and your own choice)
-            </label>
+      <section className="cat-section">
+        <div className="cat-section-head"><h2>Delete</h2></div>
+        <div className={`cat-card delete-card${del.enabled ? '' : ' off'}`}>
+          <div className="cat-card-head">
+            <input type="checkbox" className="switch" checked={del.enabled} aria-label="Offer Delete"
+                   onChange={e => { setDel({ ...del, enabled: e.target.checked }); setDirty(true) }} />
+            <div className="cat-name"><b><Icon name="trash" size={15} className="inline-ico" />Delete</b></div>
           </div>
-          <span /><span />
+          <input value={del.description} placeholder="junk: installers, temporary or generated files, duplicates"
+                 onChange={e => { setDel({ ...del, description: e.target.value }); setDirty(true) }} aria-label="Delete description" />
+          <label className="check small" title="Otherwise only rules and your manual choice send files to Delete">
+            <input type="checkbox" checked={del.suggest} onChange={e => { setDel({ ...del, suggest: e.target.checked }); setDirty(true) }} />
+            Let the model suggest Delete
+          </label>
+          <span className="muted small">Files go to a hidden <code>.classifiles-trash</code> folder first; Undo works until you empty the trash.</span>
         </div>
       </section>
 
-      <footer className="actions">
-        <button className="primary" onClick={save} disabled={!dirty || saving}>{saving ? 'Saving…' : 'Save categories'}</button>
-        <button onClick={() => { setRoots(data.roots); setRows(toRows(data)); setDel(data.delete); setDirty(false) }} disabled={!dirty}>
-          Discard changes
-        </button>
-        <span className="grow" />
-        <button onClick={reload} disabled={dirty} title="Re-read folders from disk">Re-read folders</button>
-      </footer>
+      {dirty && (
+        <footer className="actions">
+          <span className="muted small grow">Unsaved changes</span>
+          <button className="ghost" onClick={() => { setRoots(data.roots); setRows(toRows(data)); setDel(data.delete); setDirty(false) }}>
+            Discard
+          </button>
+          <button className="primary" onClick={save} disabled={saving}>{saving ? 'Saving…' : 'Save categories'}</button>
+        </footer>
+      )}
 
       {picker && (
         <FolderPicker

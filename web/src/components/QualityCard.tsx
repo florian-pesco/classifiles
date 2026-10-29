@@ -14,9 +14,13 @@ function Line({ label, s }: { label: string; s: QualitySummary }) {
   if (!s.files) return null
   const right = Math.round((s.accuracy ?? 0) * s.files)
   return (
-    <li>
-      <span className="grow">{label}</span>
-      <span className="small"><b>{pct(s.accuracy)}</b> right ({right} of {s.files}) · right one in top 3: {pct(s.top3)}</span>
+    <li className="metric">
+      <span className="metric-value">{pct(s.accuracy)}</span>
+      <div className="metric-body">
+        <span className="metric-label">{label}</span>
+        <div className="bar"><div className="high" style={{ width: `${(s.accuracy ?? 0) * 100}%` }} /></div>
+        <span className="small muted">{right} of {s.files} right · right one in the top 3: {pct(s.top3)}</span>
+      </div>
     </li>
   )
 }
@@ -50,7 +54,7 @@ export function QualityCard({ fail }: { fail: (e: unknown) => void }) {
             {Object.entries(q.decided_via).map(([k, n]) => `${n} ${VIA_LABEL[k] ?? k}`).join(', ')}.
             Files accepted in bulk count as right, so "changed" decisions are the most telling.
           </p>
-          <ul className="simple-list">
+          <ul className="metrics">
             {Object.entries(q.recorded).map(([backend, s]) => (
               <Line key={backend} label={`Proposals at scan time (${BACKEND_LABEL[backend] ?? backend})`} s={s} />
             ))}
@@ -61,7 +65,7 @@ export function QualityCard({ fail }: { fail: (e: unknown) => void }) {
               <p className="small muted">
                 With the trained model (each file hidden from training, as if it were new; every other decision known):
               </p>
-              <ul className="simple-list">
+              <ul className="metrics">
                 <Line label="Similar files only" s={q.mix.neighbours} />
                 <Line label={`Similar files + trained model (${Math.round(q.mix.weight * 100)}%, your setting)`} s={q.mix.mixed} />
               </ul>

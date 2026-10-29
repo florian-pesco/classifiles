@@ -34,7 +34,7 @@ Then open **http://127.0.0.1:8765** in your Windows browser. (WSL forwards local
    subfolders becomes a category. Press **Save categories** to load them.
 3. Untick categories that should never be offered (e.g. a `Backups` folder).
 4. **Settings → Model → "Learn from my folders"**, then **Save settings**.
-5. **Categories → Example index → Build index.** Classifiles samples files you have already sorted
+5. **Categories → What the model learned → Build index.** Classifiles samples files you have already sorted
    (spread over all subfolders) and learns what each category contains. The first build takes a
    few minutes; it runs at low priority, you can keep working, and **Cancel** stops it. Later runs
    (**Update index**) only process new or changed files. The first build downloads the embedding
@@ -176,7 +176,7 @@ never scanned.
 | Duplicates | Files with byte-for-byte identical content are found **within the inbox** (e.g. downloaded twice) and **against your folders** (already sorted). They're proposed for Delete (undoable trash) with "identical to …"; the copy to keep is sorted normally (the one without "(1)"/"Kopie", else the oldest). **Compare** (on the row) or **Review duplicates →** (next to the filter chips) shows both copies side by side, re-checks them, lists size, fingerprint, dates and names, and explains why this copy goes; keys ← → browse, **D** delete this copy, **K** keep both. Apply checks once more and never deletes a duplicate whose kept copy is gone or changed. The folder check uses a file list built together with **Update index** (Categories). Duplicate deletions are not learned as "junk". |
 | Second opinion | For files below the threshold (with readable text or a meaningful name), a local language model takes a second look. Review then shows **✓ both agree** or **2nd opinion: X** with *use it*. It's a hint only: it never changes the confidence or accepts anything. Model: Qwen3.5 2B (≈4 GB GPU memory, ~0.6 s per file) or Qwen3 4B (≈8 GB). It runs in its own process during that step of a scan and is closed afterwards; **Skip** stops it. The first use downloads the model once. |
 | File names | Suggest names (on), use them by default (off: the original name is kept unless you choose the suggestion), umlauts as ae/oe/ue/ss (on), and let the local language model pick type and subject for documents with text (off; uses the model of the second opinion, ~0.5 s per file during that scan step). **Photos and videos too** (on): the original name stays as the core and gets a short German title, e.g. `IMG_20250314_103344_Strand_Barcelona.jpg`, from the topic folder, **what the picture shows** (local picture model, on) and **the town from GPS** (offline town list downloaded once, on); the source app (WhatsApp …) only if nothing else is known. |
-| Trained model share | With "Learn from my folders": how much a trained model counts next to the most similar sorted files (default 50%, 0 = similar files only). It learns from all sorted files at once what sets each folder apart, which helps most with new topics. It trains on the CPU in seconds, by itself after **Update index** and after applying (Categories → Example index shows when; "retrain now" forces it). Subfolders and Delete still come from similar files and rules. |
+| Trained model share | With "Learn from my folders": how much a trained model counts next to the most similar sorted files (default 50%, 0 = similar files only). It learns from all sorted files at once what sets each folder apart, which helps most with new topics. It trains on the CPU in seconds, by itself after **Update index** and after applying (Categories → What the model learned shows when; "retrain now" forces it). Subfolders and Delete still come from similar files and rules. |
 | Learn from my decisions | After each decision in Review, the other undecided files of the same scan are re-scored with your decided files as extra examples (on by default; see Review → batches). Instant, no file access, no model run. |
 | Sample file names | For categories **without** a description, this many file names from the folder are shown to the model instead. |
 
@@ -291,7 +291,7 @@ svc.undo()
 | Banner "No categories yet" | Add a root or a manual category on the Categories page. |
 | A category shows "folder missing" | Its folder was moved, renamed, or its drive isn't mounted. |
 | Red banner "Category folder not reachable" | The drive with your categories isn't mounted (unplugged, or WSL started without it). Scans and index updates pause until it is back; connect it and press "Check again". If WSL doesn't mount it by itself: `sudo mount -t drvfs D: /mnt/d`. |
-| "The example index is empty" | Build it: Categories → Example index → Build index. |
+| "The example index is empty" | Build it: Categories → What the model learned → Build index. |
 | Proposals are poor for one category | It has few or untypical example files. Check its count on the Categories page, sort a few files by hand (they are learned on Apply), or add a description. |
 | `Config file not found` | The file given with `-c` doesn't exist. Create it with `classifiles init -c …`. |
 | "Only new" finds nothing | Every inbox file already has a proposal in some scan. Untick it to re-classify. |
