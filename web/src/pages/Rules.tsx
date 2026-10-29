@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { api, type Category, type Rule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
+import { PageHead } from '../components/PageHead'
+import { Icon } from '../components/Icon'
 
 /** Editable form of a rule; converted to/from the config format on load/save. */
 interface Draft {
@@ -75,6 +77,7 @@ export function RulesPage({ categories, notify, fail }: {
 
   return (
     <div className="page">
+      <PageHead title="Rules" lead="Fixed rules for the obvious cases, checked before the model." />
       <section className="card explain">
         <h2>Rules</h2>
         <p>
@@ -90,7 +93,7 @@ export function RulesPage({ categories, notify, fail }: {
         </ul>
       </section>
 
-      {drafts.length === 0 && <p className="empty">No rules yet.</p>}
+      {drafts.length === 0 && <div className="empty">No rules yet.</div>}
 
       {drafts.map((d, i) => (
         <section key={d.id} className={`card rule${hasCondition(d) && d.folder ? '' : ' incomplete'}`}>
@@ -99,7 +102,7 @@ export function RulesPage({ categories, notify, fail }: {
             <span className="grow" />
             <button className="icon" disabled={i === 0} onClick={() => move(i, -1)} title="Move up">↑</button>
             <button className="icon" disabled={i === drafts.length - 1} onClick={() => move(i, 1)} title="Move down">↓</button>
-            <button className="icon no" title="Delete rule" onClick={() => { setDrafts(ds => ds.filter(x => x.id !== d.id)); setDirty(true) }}>✕</button>
+            <button className="icon no" title="Delete rule" onClick={() => { setDrafts(ds => ds.filter(x => x.id !== d.id)); setDirty(true) }}><Icon name="x" /></button>
           </div>
           <div className="rule-grid">
             <label className="field"><span>Extensions</span>

@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { Category, Proposal, ReviewAction } from '../api'
 import { CategorySelect } from './CategorySelect'
 import { PathDialog } from './PathEditor'
+import { Icon } from './Icon'
 
 /** Actions for the selected rows: accept, set category / folder, keep in inbox, reset. */
 export function BulkBar({ selected, categories, onAction, onClear }: {
@@ -20,11 +21,11 @@ export function BulkBar({ selected, categories, onAction, onClear }: {
 
   return (
     <div className="bulk-bar" role="toolbar" aria-label="Selected files">
-      <b>{selected.length} selected</b>
+      <b className="bulk-count">{selected.length} selected</b>
       {open.length < selected.length && <span className="muted small">({selected.length - open.length} already applied)</span>}
       <button className="primary" onClick={() => onAction('accept')} disabled={!open.length || withoutCategory > 0}
               title={withoutCategory ? `${withoutCategory} selected files have no category yet` : 'Accept each file as suggested'}>
-        ✓ Accept
+        <Icon name="check" size={16} />Accept
       </button>
       <CategorySelect value={null} categories={categories} placeholder="Move all to…" label="Category for the selected files"
                       onChange={name => name && onAction('accept', name)} disabled={!open.length} />
@@ -44,8 +45,8 @@ export function BulkBar({ selected, categories, onAction, onClear }: {
           </button>
         </>
       )}
-      <button onClick={() => onAction('reject')} disabled={!open.length}>✕ Keep in inbox</button>
-      <button onClick={() => onAction('reset')} disabled={!open.length} title="Back to the model's suggestion">↺ Reset</button>
+      <button onClick={() => onAction('reject')} disabled={!open.length}><Icon name="x" size={16} />Keep in inbox</button>
+      <button onClick={() => onAction('reset')} disabled={!open.length} title="Back to the model's suggestion"><Icon name="undo" size={16} />Reset</button>
       <span className="grow" />
       <button className="linkish" onClick={onClear}>clear selection</button>
       {folderFor && (

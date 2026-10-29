@@ -3,6 +3,7 @@ import { api, humanSize, shortDate, type Batch, type Scan, type TrashItem } from
 import { Modal } from '../components/Modal'
 import { QualityCard } from '../components/QualityCard'
 import { STATUS_LABEL } from '../labels'
+import { PageHead } from '../components/PageHead'
 
 export function HistoryPage({ openScan, notify, fail }: {
   openScan: (id: number) => void
@@ -42,6 +43,7 @@ export function HistoryPage({ openScan, notify, fail }: {
 
   return (
     <div className="page">
+      <PageHead title="History & trash" lead="How well the suggestions matched your decisions, every scan, every applied change, and what is in the trash." />
       <QualityCard fail={fail} />
 
       <section className="card">

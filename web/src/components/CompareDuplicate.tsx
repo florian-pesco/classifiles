@@ -80,9 +80,9 @@ export function CompareDuplicate({ list, startId, onDecide, onClose }: {
         <div className="facts">
           <div className={details.identical_now ? 'verdict ok' : 'verdict bad'}>
             {details.identical_now
-              ? '✓ Verified just now: both files are byte-for-byte identical.'
-              : details.other.exists ? '✕ Not identical anymore: one of the files changed. Better keep both.'
-                : '✕ The other copy is gone. Better keep this one.'}
+              ? 'Verified just now: both files are byte-for-byte identical.'
+              : details.other.exists ? 'Not identical anymore: one of the files changed. Better keep both.'
+                : 'The other copy is gone. Better keep this one.'}
           </div>
           <table className="facts-table small">
             <thead><tr><th /><th>this copy</th><th>kept copy</th><th /></tr></thead>
@@ -123,7 +123,7 @@ function Row({ label, a, b, same, mono = false }: { label: string; a: string; b:
       <td className={mono ? 'mono' : undefined}>{a}</td>
       <td className={mono ? 'mono' : undefined}>{b}</td>
       <td className={same === null ? 'muted' : same ? 'ok-text' : 'warn-text'}>
-        {same === null ? 'may differ' : same ? '✓ same' : '✕ differs'}
+        {same === null ? 'may differ' : same ? 'same' : 'differs'}
       </td>
     </tr>
   )

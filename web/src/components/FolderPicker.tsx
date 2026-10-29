@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api, type FsListing } from '../api'
 import { Modal } from './Modal'
+import { Icon } from './Icon'
 
 /** Browse the folders the server can see (WSL paths; Windows drives are under /mnt/<letter>). */
 export function FolderPicker({ title, start, onPick, onClose }: {
@@ -43,10 +44,10 @@ export function FolderPicker({ title, start, onPick, onClose }: {
       </div>
       {error && <div className="banner error">{error}</div>}
       <div className="picker-list" aria-busy={loading}>
-        {listing?.parent && <button className="picker-item" onClick={() => go(listing.parent!)}>⬑ ..</button>}
+        {listing?.parent && <button className="picker-item" onClick={() => go(listing.parent!)}><Icon name="undo" size={15} />..</button>}
         {listing?.dirs.map(d => (
           <button key={d} className="picker-item" onClick={() => go(`${listing.path}/${d}`.replace('//', '/'))}>
-            📁 {d}
+            <Icon name="folder" size={15} />{d}
           </button>
         ))}
         {listing?.path && listing.dirs.length === 0 && <p className="muted small">No subfolders.</p>}

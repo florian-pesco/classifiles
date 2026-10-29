@@ -1,6 +1,8 @@
 import { useState } from 'react'
 import { api, type Settings } from '../api'
 import { PathInput } from '../components/FolderPicker'
+import { PageHead } from '../components/PageHead'
+import { Icon } from '../components/Icon'
 
 const MODELS = [
   { value: 'examples:', label: 'Learn from my folders (recommended; build the index on the Categories page)' },
@@ -87,20 +89,34 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
 
   return (
     <div className="page">
-      <section className="card">
+      <PageHead title="Settings" lead="How classifiles reads, decides and names. Everything runs on this PC." />
+      <div className="settings-layout">
+        <nav className="settings-nav" aria-label="Settings sections">
+          <a href="#set-inbox-folders" onClick={e => { e.preventDefault(); document.getElementById('set-inbox-folders')?.scrollIntoView({ behavior: 'smooth' }) }}>Inbox folders</a>
+          <a href="#set-classification" onClick={e => { e.preventDefault(); document.getElementById('set-classification')?.scrollIntoView({ behavior: 'smooth' }) }}>Classification</a>
+          <a href="#set-reading-inbox-files" onClick={e => { e.preventDefault(); document.getElementById('set-reading-inbox-files')?.scrollIntoView({ behavior: 'smooth' }) }}>Reading inbox files</a>
+          <a href="#set-pictures" onClick={e => { e.preventDefault(); document.getElementById('set-pictures')?.scrollIntoView({ behavior: 'smooth' }) }}>Pictures</a>
+          <a href="#set-duplicates" onClick={e => { e.preventDefault(); document.getElementById('set-duplicates')?.scrollIntoView({ behavior: 'smooth' }) }}>Duplicates</a>
+          <a href="#set-learn-from-my-decisions" onClick={e => { e.preventDefault(); document.getElementById('set-learn-from-my-decisions')?.scrollIntoView({ behavior: 'smooth' }) }}>Learn from my decisions</a>
+          <a href="#set-file-names" onClick={e => { e.preventDefault(); document.getElementById('set-file-names')?.scrollIntoView({ behavior: 'smooth' }) }}>File names</a>
+          <a href="#set-second-opinion" onClick={e => { e.preventDefault(); document.getElementById('set-second-opinion')?.scrollIntoView({ behavior: 'smooth' }) }}>Second opinion</a>
+          <a href="#set-learn-from-my-folders-limits" onClick={e => { e.preventDefault(); document.getElementById('set-learn-from-my-folders-limits')?.scrollIntoView({ behavior: 'smooth' }) }}>Learn from my folders: limits</a>
+        </nav>
+        <div className="settings-body">
+      <section className="card" id="set-inbox-folders">
         <h3>Inbox folders</h3>
         <p className="muted small">Folders to clean up. The first one is pre-filled on the Review page. Inboxes never become categories.</p>
         {inboxes.map((p, i) => (
           <div key={i} className="row-form">
             <PathInput value={p} label="Inbox folder" placeholder="/mnt/d/…/Inbox"
                        onChange={v => setInboxes(xs => xs.map((x, j) => (j === i ? v : x)))} />
-            <button className="icon no" title="Remove" onClick={() => setInboxes(xs => xs.filter((_, j) => j !== i))}>✕</button>
+            <button className="icon no" title="Remove" onClick={() => setInboxes(xs => xs.filter((_, j) => j !== i))}><Icon name="x" /></button>
           </div>
         ))}
         <button onClick={() => setInboxes(xs => [...xs, ''])}>+ Add inbox</button>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-classification">
         <h3>Classification</h3>
         <label className="field">
           <span>Confidence threshold: <b>{threshold.toFixed(2)}</b>. At or above it, a file is "suggested". Below it, it "needs review".</span>
@@ -136,7 +152,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-reading-inbox-files">
         <h3>Reading inbox files</h3>
         <p className="muted small">How much classifiles reads from new files. Everything runs on this PC; only inbox files are read this way, never while indexing.</p>
         <label className="field">
@@ -153,7 +169,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-pictures">
         <h3>Pictures</h3>
         <p className="muted small">
           Inbox pictures are compared with pictures you already sorted, by what they look like (local image model,
@@ -176,7 +192,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-duplicates">
         <h3>Duplicates</h3>
         <p className="muted small">
           Files with exactly the same content are proposed for Delete (undoable trash); the copy to keep is sorted
@@ -192,7 +208,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-learn-from-my-decisions">
         <h3>Learn from my decisions</h3>
         <p className="muted small">
           When you accept a file in Review, the other undecided files of the same scan are compared again right away,
@@ -206,7 +222,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-file-names">
         <h3>File names</h3>
         <p className="muted small">
           Documents, scans and screenshots get a suggested name: <span className="mono">Subject_Type_Detail</span>,
@@ -251,11 +267,11 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-second-opinion">
         <h3>Second opinion</h3>
         <p className="muted small">
           For files the model is unsure about, a local language model takes a second look and the Review list shows
-          "✓ both agree" or its own suggestion. It is a hint for reviewing: it never changes the confidence or
+          "both agree" or its own suggestion. It is a hint for reviewing: it never changes the confidence or
           accepts anything. The model runs on this PC only during that step of a scan and is closed afterwards.
         </p>
         <label className="check field-check">
@@ -275,7 +291,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         </label>
       </section>
 
-      <section className="card">
+      <section className="card" id="set-learn-from-my-folders-limits">
         <h3>Learn from my folders: limits</h3>
         <p className="muted small">
           Everything runs on this PC. File contents never leave it. These limits keep the index build gentle:
@@ -300,6 +316,8 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
       <footer className="actions">
         <button className="primary" onClick={save}>Save settings</button>
       </footer>
+        </div>
+      </div>
     </div>
   )
 }

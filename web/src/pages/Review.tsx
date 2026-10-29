@@ -8,6 +8,9 @@ import { BatchPanel } from '../components/BatchPanel'
 import { BulkBar } from '../components/BulkBar'
 import { CategorySelect } from '../components/CategorySelect'
 import { CompareDuplicate } from '../components/CompareDuplicate'
+import { Icon } from '../components/Icon'
+import { kindIcon } from '../components/kindIcon'
+import { PageHead } from '../components/PageHead'
 import { NameEditor } from '../components/NameEditor'
 import { PathEditor } from '../components/PathEditor'
 import { PathInput } from '../components/FolderPicker'
@@ -286,8 +289,25 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const threshold = scan?.threshold ?? settings.threshold
   const running = scan?.status === 'running'
 
+  const scanLead = scan
+    ? <>Scan #{scan.id} · {shortDate(scan.created_at)} · {scan.total} files
+        {scan.total < scan.inbox_total ? ` of ${scan.inbox_total} in the inbox` : ''} · threshold {threshold.toFixed(2)}</>
+    : 'Scan an inbox folder: each file gets a category, a folder and a name to review.'
+
   return (
-    <>
+    <div className="page">
+      <PageHead title="Review" lead={scanLead}>
+        <select className="scan-select" value={scanId ?? ''} onChange={e => setScanId(e.target.value ? Number(e.target.value) : null)}
+                aria-label="Scan">
+          {scans.length === 0 && <option value="">No scans yet</option>}
+          {scans.map(s => (
+            <option key={s.id} value={s.id}>
+              Scan #{s.id} · {shortDate(s.created_at)} · {s.inbox.split('/').pop()} · {s.total} files
+            </option>
+          ))}
+        </select>
+      </PageHead>
+
       <section className="card scan-card">
         <div className="scanbar">
           <PathInput value={inbox} onChange={setInbox} label="Inbox folder" placeholder="Inbox folder to scan" />
@@ -298,7 +318,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             <input type="checkbox" checked={onlyNew} onChange={e => setOnlyNew(e.target.checked)} /> Only new
           </label>
           <button className="primary" onClick={startScan} disabled={running}>
-            {running ? 'Scanning…' : 'Scan & classify'}
+            <Icon name="scan" size={16} />{running ? 'Scanning…' : 'Scan & classify'}
           </button>
         </div>
         {running && (scan?.phase === 'second_opinion' || scan?.phase === 'naming') && (
@@ -326,29 +346,14 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
         {scan?.status === 'failed' && <div className="banner error">Scan failed: {scan.error}</div>}
       </section>
 
-      <div className="toolbar">
-        <select value={scanId ?? ''} onChange={e => setScanId(e.target.value ? Number(e.target.value) : null)}
-                aria-label="Scan">
-          {scans.length === 0 && <option value="">No scans yet</option>}
-          {scans.map(s => (
-            <option key={s.id} value={s.id}>
-              Scan #{s.id} · {shortDate(s.created_at)} · {s.inbox.split('/').pop()} · {s.total} files
-            </option>
+      <nav className="filters" aria-label="Filter by status">
+        <div className="seg">
+          {FILTERS.map(f => (
+            <button key={f} className={f === filter ? 'active' : ''} onClick={() => setFilter(f)} aria-pressed={f === filter}>
+              {f === 'all' ? 'All' : STATUS_LABEL[f]}<span className="count">{counts[f] ?? 0}</span>
+            </button>
           ))}
-        </select>
-        <input className="search" type="search" placeholder="Search name or category…" value={search}
-               onChange={e => setSearch(e.target.value)} aria-label="Search" />
-        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} aria-label="Sort">
-          {SORTS.map(s => <option key={s.key} value={s.key}>Sort: {s.label}</option>)}
-        </select>
-      </div>
-
-      <nav className="filters">
-        {FILTERS.map(f => (
-          <button key={f} className={f === filter ? 'chip active' : 'chip'} onClick={() => setFilter(f)}>
-            {f === 'all' ? 'All' : STATUS_LABEL[f]} <span className="count">{counts[f] ?? 0}</span>
-          </button>
-        ))}
+        </div>
         {counts.duplicates > 0 && (
           <>
             <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
@@ -362,12 +367,18 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
             )}
           </>
         )}
-        <span className="grow" />
-        {scan && !running && scan.total < scan.inbox_total && (
-          <span className="muted small">{scan.total} of {scan.inbox_total} inbox files ·</span>
-        )}
-        <span className="muted small">threshold {threshold.toFixed(2)}</span>
       </nav>
+
+      <div className="toolbar">
+        <label className="searchbox">
+          <Icon name="search" size={16} />
+          <input type="search" placeholder="Search name or category…" value={search}
+                 onChange={e => setSearch(e.target.value)} aria-label="Search" />
+        </label>
+        <select value={sort} onChange={e => setSort(e.target.value as SortKey)} aria-label="Sort">
+          {SORTS.map(s => <option key={s.key} value={s.key}>Sort: {s.label}</option>)}
+        </select>
+      </div>
 
       {!running && <BatchPanel batches={batches} active={batch?.id ?? null} onPick={pickBatch} />}
 
@@ -380,15 +391,15 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
           {batch && (
             <span className="chip active batch-chip" title={batch.why}>
               Batch: {batch.title}
-              <button className="linkish" onClick={() => pickBatch(null)} aria-label="Show all files">✕</button>
+              <button className="linkish" onClick={() => pickBatch(null)} aria-label="Show all files"><Icon name="x" size={14} /></button>
             </span>
           )}
-          <span className="muted">Tip: Shift+click a checkbox to select a range.</span>
+          <span className="muted grow">Shift+click a checkbox to select a range.</span>
         </div>
       )}
 
       {proposals.length === 0 && !running && (
-        <p className="empty">No proposals yet. Pick an inbox folder and press <b>Scan &amp; classify</b>.</p>
+        <div className="empty"><Icon name="inbox" size={30} />No proposals yet. Pick an inbox folder and press <b>Scan &amp; classify</b>.</div>
       )}
       {proposals.length > 0 && visible.length === 0 && <p className="empty">Nothing matches.</p>}
 
@@ -408,17 +419,17 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       ) : (
         <footer className="actions">
           <button onClick={() => acceptSuggested()} disabled={!counts.suggested}>
-            Accept all suggested ({counts.suggested ?? 0})
+            <Icon name="check" size={16} />Accept all suggested ({counts.suggested ?? 0})
           </button>
           <button onClick={() => acceptSuggested(true)} disabled={!counts.suggested}
                   title="Accept the suggested categories, but put the files directly into the category folders">
             … category only
           </button>
-          <button className="primary" onClick={openPlan} disabled={!counts.accepted}>
-            Apply accepted ({counts.accepted ?? 0})
-          </button>
           <span className="grow" />
-          <button onClick={undoLast}>Undo last apply</button>
+          <button className="ghost" onClick={undoLast}><Icon name="undo" size={16} />Undo last apply</button>
+          <button className="primary" onClick={openPlan} disabled={!counts.accepted}>
+            Apply accepted ({counts.accepted ?? 0})<Icon name="chevron" size={16} />
+          </button>
         </footer>
       )}
 
@@ -453,7 +464,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
           </div>
         </Modal>
       )}
-    </>
+    </div>
   )
 }
 
@@ -477,96 +488,116 @@ function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, o
   const viaOcr = String(p.evidence.meta?.note ?? '').startsWith('text read by OCR')
   const llmAgrees = !!p.llm_choice && p.llm_choice === p.final_target
   const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
+  const showName = cat && cat.source !== 'delete' && !p.duplicate_of && (p.suggested_name || p.new_name)
 
   return (
     <li className={`row status-${p.status}${p.duplicate_of ? ' is-dup' : ''}${selected ? ' selected' : ''}`}>
       <input type="checkbox" className="pick" checked={selected} aria-label={`Select ${p.name}`}
              onChange={() => undefined} onClick={e => onSelect(e.shiftKey)} />
+      <div className="kind-ico" title={p.kind}><Icon name={kindIcon(p.kind)} /></div>
       <div className="file">
-        <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open}>{p.name}</button>
-        <div className="muted small">
-          {p.kind}{looks ? ` · ${looks}` : ''} · {humanSize(p.size)} · {p.evidence.modified?.slice(0, 10)}
-          {source && <> · from <span title="Where it was downloaded from">{source}</span></>}
-          {viaOcr && <> · <span title="Text read by OCR (scanned PDF)">OCR</span></>}
+        <div className="file-name">
+          <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open} title={p.name}>{p.name}</button>
           {p.relearned === 1 && !done && (
-            <> · <span className="badge learned" title="Updated from your decisions in this scan (see Why)">↻ learned</span></>
+            <span className="badge learned plain" title="Updated from your decisions in this scan (see details)">
+              <Icon name="learn" size={12} />learned
+            </span>
           )}
-          {' · '}<button className="linkish" onClick={onPreview}>preview</button>
         </div>
-        {p.llm_choice && (
-          <div className="second-opinion small">
-            {llmAgrees
-              ? <span className="badge so-agree" title="The language model chose the same category">✓ both agree</span>
-              : (
-                <>
-                  <span className="badge so-differ" title="The language model chose a different category">2nd opinion: {p.llm_choice}</span>
-                  {!done && (
-                    <button className="linkish" onClick={() => onReview(p, 'accept', p.llm_choice!)}>use it</button>
-                  )}
-                </>
-              )}
-          </div>
-        )}
-        {open && (
-          <div className="details small">
-            {p.reason && <div><b>Why:</b> {p.reason}</div>}
-            {p.name_reason && p.suggested_name && (
-              <div><b>Name:</b> <span className="mono">{p.suggested_name}</span>, because: {p.name_reason}</div>
-            )}
-            {p.alternatives.length > 0 && (
-              <div><b>Scores:</b> {p.alternatives.map(a => `${a.folder} ${(a.probability * 100).toFixed(0)}%`).join(' · ')}</div>
-            )}
-            {done && p.applied_dst && <div><b>Now at:</b> <span className="mono">{p.applied_dst}</span></div>}
-            {p.evidence.text
-              ? <div className="snippet">{p.evidence.text.slice(0, 400)}</div>
-              : <div className="warn-text">No readable content: judged by file name and type only.</div>}
-          </div>
-        )}
+        <div className="meta">
+          <span>{p.kind}{looks ? ` · ${looks}` : ''}</span>
+          <span>{humanSize(p.size)}</span>
+          <span>{p.evidence.modified?.slice(0, 10)}</span>
+          {source && <span title="Where it was downloaded from">from {source}</span>}
+          {viaOcr && <span title="Text read by OCR (scanned PDF)">OCR</span>}
+          <button className="linkish toggle-details" onClick={() => setOpen(o => !o)} aria-expanded={open}>
+            <Icon name="chevron" size={13} />details
+          </button>
+          <button className="linkish" onClick={onPreview}>preview</button>
+        </div>
       </div>
 
       <div className="conf" title={`${p.source}: ${(p.confidence * 100).toFixed(0)}%`}>
+        <div className="conf-top"><span>{(p.confidence * 100).toFixed(0)}%</span>{p.source === 'rule' && <span>rule</span>}</div>
         <div className="bar"><div className={confClass} style={{ width: `${p.confidence * 100}%` }} /></div>
-        <span className="small">{(p.confidence * 100).toFixed(0)}%{p.source === 'rule' ? ' · rule' : ''}</span>
       </div>
 
       <CategorySelect value={p.final_target} categories={categories} disabled={done}
                       onChange={name => name && onReview(p, 'accept', name)} label={`Category for ${p.name}`} />
 
-      <span className={`badge ${p.status}`}>{statusLabel}</span>
-
-      {p.duplicate_of && (
-        <div className="dup-line small">
-          <span className="dup-label">
-            {p.duplicate_kind === 'sorted' ? 'Identical file already in your folders:' : 'Identical file also in the inbox:'}
-          </span>
-          <span className="mono dup-path" title={p.duplicate_of}>{p.duplicate_of}</span>
-          <button className="compare-btn" onClick={onCompare}>Compare</button>
-        </div>
-      )}
-      {cat && cat.source !== 'delete' && (
-        <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
-                    newFolder={p.new_folder} disabled={done}
-                    onChange={sub => onReview(p, 'accept', p.final_target ?? undefined, sub)} />
-      )}
-      {cat && cat.source !== 'delete' && !p.duplicate_of && (p.suggested_name || p.new_name) && (
-        <NameEditor original={p.name} suggested={p.suggested_name} current={p.new_name} reason={p.name_reason}
-                    disabled={done}
-                    onUse={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, true)}
-                    onKeep={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, false)}
-                    onSet={n => onReview(p, 'accept', p.final_target ?? undefined, undefined, n)} />
-      )}
+      <span className={`badge status ${p.status}`}>{statusLabel}</span>
 
       <div className="rowbtns">
         {!done && p.status !== 'accepted' && (
-          <button className="icon ok" onClick={() => onReview(p, 'accept')} disabled={!p.final_target} title="Accept">✓</button>
+          <button className="icon ok" onClick={() => onReview(p, 'accept')} disabled={!p.final_target} title="Accept" aria-label="Accept">
+            <Icon name="check" />
+          </button>
         )}
         {!done && p.status !== 'rejected' && (
-          <button className="icon no" onClick={() => onReview(p, 'reject')} title="Keep in inbox">✕</button>
+          <button className="icon no" onClick={() => onReview(p, 'reject')} title="Keep in inbox" aria-label="Keep in inbox">
+            <Icon name="x" />
+          </button>
         )}
         {!done && (p.status === 'accepted' || p.status === 'rejected') && (
-          <button className="icon" onClick={() => onReview(p, 'reset')} title="Reset">↺</button>
+          <button className="icon" onClick={() => onReview(p, 'reset')} title="Reset" aria-label="Reset"><Icon name="undo" /></button>
         )}
       </div>
+
+      <div className="row-sub">
+        {p.duplicate_of && (
+          <div className="dup-line">
+            <span className="dup-label">
+              <Icon name="copy" size={15} />
+              {p.duplicate_kind === 'sorted' ? 'Identical file already in your folders:' : 'Identical file also in the inbox:'}
+            </span>
+            <span className="mono dup-path" title={p.duplicate_of}>{p.duplicate_of}</span>
+            <button className="compare-btn" onClick={onCompare}>Compare</button>
+          </div>
+        )}
+        {cat && cat.source !== 'delete' && (
+          <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
+                      newFolder={p.new_folder} disabled={done}
+                      onChange={sub => onReview(p, 'accept', p.final_target ?? undefined, sub)} />
+        )}
+        {showName && (
+          <NameEditor original={p.name} suggested={p.suggested_name} current={p.new_name} reason={p.name_reason}
+                      disabled={done}
+                      onUse={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, true)}
+                      onKeep={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, false)}
+                      onSet={n => onReview(p, 'accept', p.final_target ?? undefined, undefined, n)} />
+        )}
+        {p.llm_choice && (
+          <div className="second-opinion small">
+            {llmAgrees
+              ? <span className="badge so-agree" title="The language model chose the same category">both agree</span>
+              : (
+                <>
+                  <span className="badge so-differ" title="The language model chose a different category">2nd opinion: {p.llm_choice}</span>
+                  {!done && <button className="linkish" onClick={() => onReview(p, 'accept', p.llm_choice!)}>use it</button>}
+                </>
+              )}
+          </div>
+        )}
+      </div>
+
+      {open && (
+        <dl className="details">
+          {p.reason && <><dt>Why</dt><dd>{p.reason}</dd></>}
+          {p.alternatives.length > 0 && (
+            <><dt>Scores</dt><dd>{p.alternatives.map(a => `${a.folder} ${(a.probability * 100).toFixed(0)}%`).join(' · ')}</dd></>
+          )}
+          {p.name_reason && p.suggested_name && (
+            <><dt>Name</dt><dd><span className="mono">{p.suggested_name}</span>: {p.name_reason}</dd></>
+          )}
+          {done && p.applied_dst && <><dt>Now at</dt><dd className="mono">{p.applied_dst}</dd></>}
+          <dt>Content</dt>
+          <dd>
+            {p.evidence.text
+              ? <div className="snippet">{p.evidence.text.slice(0, 400)}</div>
+              : <span className="warn-text">No readable content: judged by file name and type only.</span>}
+          </dd>
+        </dl>
+      )}
     </li>
   )
 }

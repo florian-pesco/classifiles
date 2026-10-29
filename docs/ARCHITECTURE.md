@@ -538,8 +538,10 @@ src/classifiles/
 src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
 src/classifiles_cli/main.py  `classifiles` command (typer)
 web/src/api.ts               typed fetch wrappers for every endpoint
-web/src/App.tsx              the whole UI: scan bar, filters, rows, move dialog, settings dialog
-web/src/index.css            styles (light/dark via prefers-color-scheme)
+web/src/App.tsx              app shell: sidebar navigation, theme switch (light/auto/dark), notices
+web/src/pages/*.tsx          Review, Categories, Rules, History & trash, Settings
+web/src/components/*.tsx     rows' editors (folder, name), batches, bulk bar, compare, preview, icons
+web/src/index.css            design tokens (light/dark) and all styles
 tests/                       pytest; conftest.py builds a throwaway folder tree per test
 ```
 

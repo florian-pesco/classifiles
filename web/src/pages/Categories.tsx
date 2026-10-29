@@ -2,6 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { api, type CategoriesPayload, type CategoryEntry, type DeleteSettings } from '../api'
 import { FolderPicker } from '../components/FolderPicker'
 import { IndexCard } from '../components/IndexCard'
+import { PageHead } from '../components/PageHead'
+import { Icon } from '../components/Icon'
 
 interface Row {
   path: string
@@ -84,6 +86,7 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
 
   return (
     <div className="page">
+      <PageHead title="Categories" lead="The places files can go, and what the model has learned about them." />
       <section className="card explain">
         <h2>Categories</h2>
         <p>
@@ -105,10 +108,11 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
         <ul className="simple-list">
           {roots.map(r => (
             <li key={r.path}>
-              <span className="mono">{r.path}</span>
+              <Icon name="folder" className="muted" />
+              <span className="mono grow">{r.path}</span>
               <button className="icon no" title="Remove root" onClick={() => {
                 setRoots(rs => rs.filter(x => x.path !== r.path)); setDirty(true)
-              }}>✕</button>
+              }}><Icon name="x" /></button>
             </li>
           ))}
         </ul>
@@ -158,7 +162,7 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
                   {r.source === 'manual'
                     ? <button className="icon no" title="Remove category" onClick={() => {
                         setRows(rs => rs.filter(x => x.path !== r.path)); setDirty(true)
-                      }}>✕</button>
+                      }}><Icon name="x" /></button>
                     : <span />}
                 </div>
               )
@@ -177,7 +181,7 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
       )}
 
       <section className="card">
-        <h3>🗑 Delete</h3>
+        <h3>Delete</h3>
         <p className="muted small">
           A built-in category for junk. "Deleted" files first go to a hidden <code>.classifiles-trash</code> folder
           inside the inbox. That can be undone until you empty the trash (History page).

@@ -20,7 +20,7 @@ export function CategorySelect({ value, categories, onChange, disabled, label, p
       {folders.map(c => (
         <option key={c.name} value={c.name}>{c.name}{c.action === 'copy' ? ' (copy)' : ''}</option>
       ))}
-      {del && <option value={del.name}>🗑 {del.name}</option>}
+      {del && <option value={del.name}>{del.name} (to trash)</option>}
     </select>
   )
 }
