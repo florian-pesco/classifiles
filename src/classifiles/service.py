@@ -6,7 +6,7 @@ import logging
 import os
 import threading
 import uuid
-from pathlib import Path
+from pathlib import Path, PurePath
 from typing import Callable
 
 from .classifier import Classifier
@@ -14,7 +14,7 @@ from .config import ACTIONS, Settings
 from .deciders import Decider, make_decider
 from .deciders.examples import DECIDED, ExampleDecider
 from .embedder import Embedder
-from . import llm
+from . import llm, naming
 from .duplicates import Catalog, find_duplicates
 from .image_index import ImageEmbedder, ImageIndex, is_image
 from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text, inbox_text
@@ -58,6 +58,8 @@ class ClassifilesService:
         self._train_timer: threading.Timer | None = None
         self._auto_trained = False
         self.retrain_delay = 30.0  # seconds after an apply/undo before retraining (debounced)
+        self._labeller = None
+        self._places = None
 
     # --- categories, rules & model -----------------------------------------------------------
 
@@ -431,9 +433,8 @@ class ClassifilesService:
             if self.settings.detect_duplicates and out:
                 self._mark_duplicates(scan["inbox"], out)
                 out = [self.get_proposal(p["id"]) for p in out]
-            if self.settings.second_opinion and self.settings.backend == "examples":
-                if self.run_second_opinion(scan_id, out, scan["threshold"]):
-                    out = [self.get_proposal(p["id"]) for p in out]
+            if self.run_llm_steps(scan_id, out, scan["threshold"]):
+                out = [self.get_proposal(p["id"]) for p in out]
             self.store.update("scans", scan_id, {"status": "done"})
             return out
         except Exception as e:
@@ -461,7 +462,11 @@ class ClassifilesService:
         c = clf.classify(ev)
         status = "suggested" if c.target and c.confidence >= threshold else "needs_review"
         subpath, new_folder, container = self._folder_for(c.target, c.neighbours, ev.name)
+        hints = self._media_hints(ev, c.image_vector)
+        names = self._name_fields(ev.name, ev.kind, ev.to_dict(), c.target, subpath, hints=hints)
         pid = self.store.insert("proposals", {
+            **names, "new_name": names["suggested_name"] if self.settings.use_suggested_names else None,
+            "name_hints": hints,
             "scan_id": scan_id, "path": str(path), "name": ev.name, "kind": ev.kind, "size": ev.size,
             "evidence": ev.to_dict(), "target": c.target, "confidence": c.confidence, "source": c.source,
             "alternatives": c.alternatives, "reason": c.reason, "status": status,
@@ -491,6 +496,7 @@ class ClassifilesService:
                 continue
             where = "in your folders" if d.kind == "sorted" else "in the inbox"
             values = {"duplicate_of": d.of, "duplicate_kind": d.kind, "duplicate_path": d.path,
+                      "suggested_name": None, "new_name": None, "name_reason": None,
                       "content_hash": d.content_hash, "updated_at": now(),
                       "reason": f"identical to {d.of} ({where})"}
             if delete is not None:
@@ -544,44 +550,208 @@ class ClassifilesService:
         names = llm.candidates(p["alternatives"])
         options = {n: {"name": n, "description": cats[n].description if n in cats else "",
                        "examples": llm.examples_for(p["neighbours"] or [], n)} for n in names}
-        letters = llm.LETTERS[:len(names)]
-        # Ask once per rotation of the option order and average: small models prefer certain
-        # letters (often "A", which would always be the example model's favourite).
-        p_llm = {n: 0.0 for n in names}
-        rotations = max(1, min(self.settings.llm_rotations, len(names)))
-        for r in range(rotations):
-            order = names[r:] + names[:r]
-            probs = client.choose(llm.build_prompt(p["_ev"], [options[n] for n in order]), letters)
-            for n, letter in zip(order, letters):
-                p_llm[n] += probs[letter] / rotations
+        p_llm = llm.ask_rotated(client, lambda order: llm.build_prompt(p["_ev"], [options[n] for n in order]),
+                                names, self.settings.llm_rotations, llm.LETTERS)
         return {"p_llm": p_llm}
 
     def run_second_opinion(self, scan_id: int, proposals: list[dict], threshold: float) -> int:
         """Ask the local language model about unsure proposals and record its answer as a review
-        hint. Returns how many were checked. The model runs in its own process, which is stopped
-        afterwards."""
+        hint. Returns how many were checked."""
         todo = self.second_opinion_candidates(proposals, threshold)
-        if not todo:
+        return self._llm_session(scan_id, [("second_opinion", todo, lambda c, p: self._record_second_opinion(
+            p, self.ask_second_opinion(c, p)))])
+
+    def run_llm_steps(self, scan_id: int, proposals: list[dict], threshold: float) -> int:
+        """The optional language-model steps of a scan, in one model session: second opinion on
+        unsure files, then type and subject of suggested file names."""
+        steps = []
+        if self.settings.second_opinion and self.settings.backend == "examples":
+            steps.append(("second_opinion", self.second_opinion_candidates(proposals, threshold),
+                          lambda c, p: self._record_second_opinion(p, self.ask_second_opinion(c, p))))
+        if self.settings.name_llm and self.settings.name_suggestions:
+            steps.append(("naming", self.name_candidates(proposals), self._ask_and_record_name))
+        return self._llm_session(scan_id, steps)
+
+    def _llm_session(self, scan_id: int, steps: list[tuple]) -> int:
+        """Run steps [(phase, proposals, fn(client, proposal))] with one model process, which is
+        stopped afterwards. Returns how many proposals were handled."""
+        steps = [s for s in steps if s[1]]
+        if not steps:
             return 0
         self._llm_cancel.clear()
-        self.store.update("scans", scan_id, {"phase": "second_opinion", "llm_total": len(todo), "llm_done": 0})
         if self._index is not None:
             self._index.embedder.unload()  # free GPU memory for the language model
         if self._image_index is not None:
             self._image_index.embedder.unload()
-        done = 0
+        done_total = 0
+        self.store.update("scans", scan_id, {"phase": steps[0][0], "llm_total": len(steps[0][1]), "llm_done": 0})
         try:
             with llm.LLMClient(self.settings.llm_model, self.settings.llm_gpu_fraction,
                                self.settings.cpu_threads) as client:
-                for p in todo:
-                    if self._llm_cancel.is_set():
-                        break
-                    self._record_second_opinion(p, self.ask_second_opinion(client, p))
-                    done += 1
-                    self.store.update("scans", scan_id, {"llm_done": done})
+                for phase, todo, fn in steps:
+                    self.store.update("scans", scan_id, {"phase": phase, "llm_total": len(todo), "llm_done": 0})
+                    for i, p in enumerate(todo, 1):
+                        if self._llm_cancel.is_set():
+                            return done_total
+                        fn(client, p)
+                        done_total += 1
+                        self.store.update("scans", scan_id, {"llm_done": i})
         except llm.LLMError as e:
             self.store.update("scans", scan_id, {"llm_error": str(e)[:500]})
-        return done
+        return done_total
+
+    # --- file names -----------------------------------------------------------------------
+
+    def _is_media(self, name: str, kind: str, evidence: dict) -> bool:
+        """Photos and videos named by suggest_media (screenshots and pictures with text are documents)."""
+        return kind in naming.MEDIA_KINDS and not naming.in_scope(kind, name, evidence.get("text", ""),
+                                                                  evidence.get("meta") or {})
+
+    def _media_hints(self, ev, image_vector=None) -> dict | None:
+        """Title hints for a photo/video: what it shows, the GPS town, the source app. Best effort."""
+        s = self.settings
+        if not (s.name_suggestions and s.name_media) or not self._is_media(ev.name, ev.kind, ev.to_dict()):
+            return None
+        hints: dict = {}
+        app = naming.source_app(PurePath(ev.name).stem)
+        if app:
+            hints["app"] = app
+        if s.name_media_labels:
+            try:
+                vec = image_vector
+                if vec is None:
+                    emb = self.image_index().embedder
+                    if ev.kind == "video":
+                        from .extract.video import middle_frame
+
+                        frame = middle_frame(Path(ev.path))
+                        vec = emb.encode_images([frame])[0] if frame is not None else None
+                    else:
+                        vecs, ok = emb.encode_paths([Path(ev.path)])
+                        vec = vecs[0] if ok else None
+                if vec is not None:
+                    label, share = self.labeller().label(vec)
+                    if label:
+                        hints.update(label=label, label_share=round(share, 3))
+            except Exception:  # noqa: BLE001 - recognition is optional, never breaks a scan
+                log.exception("picture recognition for a file name failed")
+        gps = (ev.meta or {}).get("gps")
+        if s.name_media_place and gps:
+            place = self.places().nearest(*gps)
+            if place:
+                hints["place"] = place
+        return hints
+
+    def labeller(self):
+        from .labels import Labeller
+
+        if self._labeller is None or self._labeller.model != self.settings.image_model:
+            self._labeller = Labeller(self.store, self.settings.image_model, threads=self.settings.cpu_threads)
+        return self._labeller
+
+    def places(self):
+        from .places import Places
+
+        if self._places is None:
+            self._places = Places()
+        return self._places
+
+    def _name_fields(self, name: str, kind: str, evidence: dict, target: str | None, subpath: str | None,
+                     type_: str | None = None, subject: str | None = None, hints: dict | None = None) -> dict:
+        """suggested_name / name_reason for a file going to `target`/`subpath` (none for Delete)."""
+        none = {"suggested_name": None, "name_reason": None}
+        if not self.settings.name_suggestions or not target:
+            return none
+        try:
+            if self.category(target).action == "delete":
+                return none
+        except ValueError:
+            return none
+        if self._is_media(name, kind, evidence):
+            if not self.settings.name_media:
+                return none
+            s = naming.suggest_media(name, kind, evidence.get("meta") or {}, subpath or "", hints,
+                                     self.settings.name_transliterate)
+        elif kind not in naming.DOC_KINDS and kind not in naming.MEDIA_KINDS:
+            s = naming.suggest_cleanup(name)  # archives, installers, code …: only "(1)" and the like
+        else:
+            s = naming.suggest(name, kind, evidence.get("text", ""), evidence.get("meta") or {}, subpath or "",
+                               self.settings.name_transliterate, type_, subject)
+        return {"suggested_name": s.name, "name_reason": s.reason} if s else none
+
+    def _renamed(self, p: dict, target: str | None, subpath: str | None) -> dict:
+        """Recomputed name fields after the category or folder changed. A chosen suggestion follows
+        the new suggestion; a name typed by the user stays."""
+        llm_choice = p.get("name_llm") or {}
+        fields = self._name_fields(p["name"], p["kind"], p["evidence"], target, subpath, llm_choice.get("type"),
+                                   llm_choice.get("subject") if llm_choice.get("subject_where") != "folder" else None,
+                                   p.get("name_hints"))
+        if p.get("new_name") and p["new_name"] == p.get("suggested_name"):
+            fields["new_name"] = fields["suggested_name"]
+        elif fields["suggested_name"] is None and p.get("new_name") == p.get("suggested_name"):
+            fields["new_name"] = None
+        return fields
+
+    @staticmethod
+    def _typed_name(name: str, original: str) -> str | None:
+        """A name typed in Review: '' keeps the original; without an extension, the original's is added."""
+        name = name.strip()
+        if not name or name == original:
+            return None
+        n = naming.valid_name(name)
+        if not PurePath(n).suffix and PurePath(original).suffix:
+            n += PurePath(original).suffix.lower()
+        return n
+
+    def name_candidates(self, proposals: list[dict]) -> list[dict]:
+        """Proposals whose name the language model helps with: in scope, readable text, not a
+        duplicate or Delete (also when the rules found no name: the model may find the type);
+        at most llm_max_files."""
+        out = []
+        for p in proposals:
+            ev = p["evidence"]
+            if p["source"] == "duplicate" or p["status"] == "moved" or len(ev.get("text") or "") < llm.MIN_TEXT:
+                continue
+            if not naming.in_scope(p["kind"], p["name"], ev.get("text", ""), ev.get("meta") or {}):
+                continue
+            try:
+                if self.category(p["final_target"]).action == "delete":
+                    continue
+            except ValueError:
+                continue
+            out.append(p)
+            if len(out) >= self.settings.llm_max_files:
+                break
+        return out
+
+    def _ask_and_record_name(self, client, p: dict) -> None:
+        from .extract.base import Evidence
+
+        ev_d = p["evidence"]
+        ev = Evidence(**{k: v for k, v in ev_d.items() if k in Evidence.__dataclass_fields__})
+        rule_type, _ = naming.detect_type(p["name"], ev.text)
+        types = llm.type_options(p["name"], ev.text, rule_type)
+        p_type = llm.ask_rotated(client, lambda order: llm.build_type_prompt(ev, order), types,
+                                 self.settings.llm_rotations)
+        t = max(p_type, key=p_type.get)
+        t = None if t == llm.OTHER else t
+        cands = naming.subject_candidates(PurePath(p["name"]).stem, ev.text, p["subpath"] or "",
+                                          (ev_d.get("meta") or {}).get("source"), t)[:5]
+        subject = where = None
+        if cands:
+            names = [c for c, _ in cands] + [llm.NONE]
+            word = naming.TYPE_WORDS[t][0] if t else None
+            p_subj = llm.ask_rotated(client, lambda order: llm.build_subject_prompt(ev, order, word), names,
+                                     self.settings.llm_rotations)
+            best = max(p_subj, key=p_subj.get)
+            if best != llm.NONE:
+                subject, where = best, dict(cands)[best]
+        choice = {"type": t, "subject": subject, "subject_where": where}
+        fields = self._name_fields(p["name"], p["kind"], ev_d, p["final_target"], p["subpath"], t, subject)
+        update = {**fields, "name_llm": choice, "updated_at": now()}
+        if p.get("new_name") and p["new_name"] == p.get("suggested_name"):
+            update["new_name"] = fields["suggested_name"]
+        self.store.update("proposals", p["id"], update)
 
     def cancel_second_opinion(self) -> None:
         self._llm_cancel.set()
@@ -680,13 +850,16 @@ class ClassifilesService:
             return Path(p["applied_dst"])
         return Path(p["path"])
 
-    def review(self, proposal_id: int, action: str, folder: str | None = None, subpath: str | None = None) -> dict:
+    def review(self, proposal_id: int, action: str, folder: str | None = None, subpath: str | None = None,
+               name: str | None = None, use_suggested_name: bool | None = None) -> dict:
         """accept (optionally choosing the category and/or the folder inside it), reject (leave the
         file where it is), or reset.
 
         subpath: folder inside the category ('' = category top level). Missing folders in it are
         created on apply, so passing one is the confirmation for a new folder. If the category
-        changes and no subpath is given, the suggestion is recomputed for the new category."""
+        changes and no subpath is given, the suggestion is recomputed for the new category.
+        name: a new file name ('' = keep the original); use_suggested_name: True/False to use the
+        suggested name or keep the original. The suggestion follows category and folder changes."""
         if action not in REVIEW_ACTIONS:
             raise ValueError(f"action must be one of {sorted(REVIEW_ACTIONS)}")
         p = self.get_proposal(proposal_id)
@@ -706,22 +879,35 @@ class ClassifilesService:
             elif target != (p["final_target"] or p["target"]):
                 values["subpath"] = suggest_subpath(p["neighbours"] or [], target)[0]
                 values["new_folder"] = None
+            sub = values.get("subpath", p["subpath"])
+            if cat.action == "delete" or p["source"] == "duplicate":
+                values.update({"suggested_name": None, "new_name": None, "name_reason": None})
+            else:
+                if target != p["final_target"] or sub != p["subpath"]:
+                    values.update(self._renamed(p, target, sub))
+                if use_suggested_name is not None:
+                    values["new_name"] = values.get("suggested_name", p["suggested_name"]) if use_suggested_name else None
+                if name is not None:
+                    values["new_name"] = self._typed_name(name, p["name"])
         elif action == "reject":
             values = {"status": "rejected", "decided_via": "reject"}
         else:
             values = {"status": "suggested" if p["target"] and p["confidence"] >= self.settings.threshold
                       else "needs_review", "final_target": p["target"], "decided_via": None,
                       "subpath": p["suggested_subpath"] or ""}
+            if p["source"] != "duplicate":
+                values.update(self._renamed({**p, "new_name": None}, p["target"], p["suggested_subpath"] or ""))
+                values["new_name"] = values["suggested_name"] if self.settings.use_suggested_names else None
         self.store.update("proposals", proposal_id, {**values, "updated_at": now()})
         return self.get_proposal(proposal_id)
 
     def bulk_review(self, ids: list[int], action: str, folder: str | None = None,
-                    subpath: str | None = None) -> dict:
+                    subpath: str | None = None, use_suggested_name: bool | None = None) -> dict:
         """Apply one review action to several proposals. Returns {"updated": [...], "errors": [...]}."""
         updated, errors = [], []
         for pid in ids:
             try:
-                updated.append(self.review(pid, action, folder, subpath))
+                updated.append(self.review(pid, action, folder, subpath, use_suggested_name=use_suggested_name))
             except (KeyError, ValueError) as e:
                 errors.append({"proposal_id": pid, "error": str(e.args[0] if e.args else e)})
         return {"updated": updated, "errors": errors}
@@ -784,6 +970,7 @@ class ClassifilesService:
                 continue
             subpath, new_folder, _ = self._folder_for(target, nbs, r["name"])
             self.store.update("proposals", r["id"], {
+                **self._renamed(r, target, subpath),
                 "target": target, "final_target": target, "confidence": conf,
                 "alternatives": [{"folder": f, "probability": round(q, 4)} for f, q in ranked[:4]],
                 "status": "suggested" if conf >= threshold else "needs_review",
@@ -826,7 +1013,7 @@ class ClassifilesService:
 
     def _plan(self, p: dict):
         try:
-            m = plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or "")
+            m = plan_move(p["path"], self.category(p["final_target"]), p["subpath"] or "", p.get("new_name"))
         except (MoveError, ValueError) as e:
             return None, str(e)
         if p["source"] == "duplicate" and m.action == "delete":
@@ -895,7 +1082,7 @@ class ClassifilesService:
             m, err = self._plan(p)
             out.append({"proposal_id": p["id"], "src": p["path"], "dst": str(m.dst) if m else None,
                         "action": m.action if m else None, "category": p["final_target"],
-                        "subpath": p["subpath"] or "",
+                        "subpath": p["subpath"] or "", "renamed": bool(m and m.action != "delete" and p.get("new_name")),
                         "creates": str(m.created_dir) if m and m.created_dir else None, "error": err})
         return out
 

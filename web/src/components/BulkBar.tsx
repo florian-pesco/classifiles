@@ -7,7 +7,7 @@ import { PathDialog } from './PathEditor'
 export function BulkBar({ selected, categories, onAction, onClear }: {
   selected: Proposal[]
   categories: Category[]
-  onAction: (action: ReviewAction, folder?: string, subpath?: string) => void
+  onAction: (action: ReviewAction, folder?: string, subpath?: string, useSuggestedName?: boolean) => void
   onClear: () => void
 }) {
   const [folderFor, setFolderFor] = useState<string | null>(null)
@@ -16,6 +16,7 @@ export function BulkBar({ selected, categories, onAction, onClear }: {
   const common = targets.length === 1 && open.every(p => p.final_target === targets[0]) ? targets[0] : null
   const commonCat = categories.find(c => c.name === common)
   const withoutCategory = open.filter(p => !p.final_target).length
+  const withName = open.filter(p => p.suggested_name).length
 
   return (
     <div className="bulk-bar" role="toolbar" aria-label="Selected files">
@@ -31,6 +32,18 @@ export function BulkBar({ selected, categories, onAction, onClear }: {
               title={common ? `Choose one folder inside ${common} for all of them` : 'Only when all selected files have the same category'}>
         Folder…
       </button>
+      {withName > 0 && (
+        <>
+          <button onClick={() => onAction('accept', undefined, undefined, true)} disabled={withoutCategory > 0}
+                  title={`Use the suggested file name for ${withName} of them (and accept them)`}>
+            Use suggested names ({withName})
+          </button>
+          <button onClick={() => onAction('accept', undefined, undefined, false)} disabled={withoutCategory > 0}
+                  title="Keep their original file names">
+            Keep original names
+          </button>
+        </>
+      )}
       <button onClick={() => onAction('reject')} disabled={!open.length}>✕ Keep in inbox</button>
       <button onClick={() => onAction('reset')} disabled={!open.length} title="Back to the model's suggestion">↺ Reset</button>
       <span className="grow" />

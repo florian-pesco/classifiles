@@ -240,6 +240,16 @@ h3 { font-size: 15px; margin: 0; }
 .field-check { margin-top: 10px; white-space: normal; align-items: flex-start; }
 .field-check input { margin-top: 3px; }
 
+/* suggested file name (Review rows) */
+.name-editor {
+  grid-column: 1 / -1; order: 11; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-width: 0;
+}
+.name-current { overflow-wrap: anywhere; }
+.name-current.renamed { font-weight: 600; }
+.chip.suggest-name { border-style: dashed; color: var(--accent); font-family: ui-monospace, Consolas, monospace; font-size: 12.5px;
+  overflow-wrap: anywhere; text-align: left; }
+.name-input { flex: 1 1 320px; margin: 0; align-items: center; }
+
 /* second opinion */
 .second-opinion { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
 .badge.so-agree { background: var(--ok-bg); color: var(--ok); }

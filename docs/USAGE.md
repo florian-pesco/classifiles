@@ -83,7 +83,17 @@ An inbox folder is never offered as a category, even if it sits inside a root.
      `Econ 1` folder, or `…_2026_…` next to `2025`), a new sibling folder is proposed. Until you
      click it, the file goes to the existing parent folder. New folders are only ever created on
      Apply, and Undo removes them again if they're empty.
-4. **Review together (batches).** Above the list, classifiles suggests groups of files that are
+4. **File name** (line under the folder, documents/scans/screenshots only). Classifiles suggests
+   `Subject_Type_Detail`, e.g. `Telekom_Invoice_2025-03.pdf` or `Econ1_Slides_Lecture03.pdf`:
+   - **subject** from the subfolder, the sender in the text, or the original name;
+   - **type** from keywords (in the document's language: `Rechnung` for German text);
+   - **detail**: the document's date or a number like a chapter.
+
+   The original name is kept unless you click the suggestion; **edit…** lets you type any name,
+   **keep original** goes back. The suggestion follows when you change the category or folder. In the
+   footer (with files selected): **Use suggested names** / **Keep original names**. Apply shows "renamed
+   to …"; undo restores the original name. Photos, videos, archives and code are never renamed.
+5. **Review together (batches).** Above the list, classifiles suggests groups of files that are
    probably decided the same way:
    - **Same name pattern**: names that differ only in numbers, dates or IDs, e.g. `Scan_‹date›_‹n›.pdf`;
    - **Similar content**: files whose names/text are very close;
@@ -104,10 +114,10 @@ An inbox folder is never offered as a category, even if it sits inside a root.
      This reuses what the scan computed: no file is read again, no model runs. Switch it off in
      Settings. Your folders learn the files for good only when you apply.
      (Works for scans made with this version; older scans have no stored data to compare.)
-5. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
+6. **Apply accepted** shows exactly what will happen (move / copy / to trash, from → to). Nothing
    happens until you confirm.
-6. **Undo last apply** reverses the last batch. Older batches can be undone on the History page.
-7. **Older scans:** pick one from the scan dropdown, or open it from *History & trash*.
+7. **Undo last apply** reverses the last batch. Older batches can be undone on the History page.
+8. **Older scans:** pick one from the scan dropdown, or open it from *History & trash*.
 
 Status names: **Suggested** (confidence ≥ threshold) · **Needs review** (below) · **Accepted** ·
 **Kept in inbox** · **Done** (moved, copied or in trash).
@@ -165,6 +175,7 @@ never scanned.
 | Pictures | Inbox pictures are compared with pictures you already sorted, by what they look like (local image model, ≈0.3 GB GPU memory; up to 300 sorted pictures per category, built with **Update index**). Combined with the name/text result; **How much the picture counts** sets the mix (default 50%). Review shows "looks like: …" in the details. |
 | Duplicates | Files with byte-for-byte identical content are found **within the inbox** (e.g. downloaded twice) and **against your folders** (already sorted). They're proposed for Delete (undoable trash) with "identical to …"; the copy to keep is sorted normally (the one without "(1)"/"Kopie", else the oldest). **Compare** (on the row) or **Review duplicates →** (next to the filter chips) shows both copies side by side, re-checks them, lists size, fingerprint, dates and names, and explains why this copy goes; keys ← → browse, **D** delete this copy, **K** keep both. Apply checks once more and never deletes a duplicate whose kept copy is gone or changed. The folder check uses a file list built together with **Update index** (Categories). Duplicate deletions are not learned as "junk". |
 | Second opinion | For files below the threshold (with readable text or a meaningful name), a local language model takes a second look. Review then shows **✓ both agree** or **2nd opinion: X** with *use it*. It's a hint only: it never changes the confidence or accepts anything. Model: Qwen3.5 2B (≈4 GB GPU memory, ~0.6 s per file) or Qwen3 4B (≈8 GB). It runs in its own process during that step of a scan and is closed afterwards; **Skip** stops it. The first use downloads the model once. |
+| File names | Suggest names (on), use them by default (off: the original name is kept unless you choose the suggestion), umlauts as ae/oe/ue/ss (on), and let the local language model pick type and subject for documents with text (off; uses the model of the second opinion, ~0.5 s per file during that scan step). **Photos and videos too** (on): the original name stays as the core and gets a short German title, e.g. `IMG_20250314_103344_Strand_Barcelona.jpg`, from the topic folder, **what the picture shows** (local picture model, on) and **the town from GPS** (offline town list downloaded once, on); the source app (WhatsApp …) only if nothing else is known. |
 | Trained model share | With "Learn from my folders": how much a trained model counts next to the most similar sorted files (default 50%, 0 = similar files only). It learns from all sorted files at once what sets each folder apart, which helps most with new topics. It trains on the CPU in seconds, by itself after **Update index** and after applying (Categories → Example index shows when; "retrain now" forces it). Subfolders and Delete still come from similar files and rules. |
 | Learn from my decisions | After each decision in Review, the other undecided files of the same scan are re-scored with your decided files as extra examples (on by default; see Review → batches). Instant, no file access, no model run. |
 | Sample file names | For categories **without** a description, this many file names from the folder are shown to the model instead. |

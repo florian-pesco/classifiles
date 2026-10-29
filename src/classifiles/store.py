@@ -59,6 +59,11 @@ CREATE TABLE IF NOT EXISTS proposals (
     qvec BLOB,                          -- text query vector (float16), for re-scoring without re-reading
     ivec BLOB,                          -- picture vector (float16), pictures only
     relearned INTEGER NOT NULL DEFAULT 0, -- 1: proposal was updated from the user's decisions in this scan
+    suggested_name TEXT,                -- suggested new file name (naming.py); NULL = none
+    new_name TEXT,                      -- name apply will use; NULL = keep the original name
+    name_reason TEXT,                   -- where the parts of the suggested name came from
+    name_llm TEXT,                      -- JSON: type/subject the language model chose for the name
+    name_hints TEXT,                    -- JSON: photos/videos: picture label, place, source app
     updated_at TEXT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS proposals_scan ON proposals(scan_id, status);
@@ -98,6 +103,16 @@ CREATE TABLE IF NOT EXISTS catalog (
 );
 CREATE INDEX IF NOT EXISTS catalog_size ON catalog(size);
 -- Already-sorted files used as examples by the example-based classifier (see examples.py).
+-- Picture label prompts embedded once (labels.py).
+CREATE TABLE IF NOT EXISTS label_features (
+    id INTEGER PRIMARY KEY,
+    version TEXT NOT NULL,                -- hash of model + label list
+    model TEXT NOT NULL,
+    vectors BLOB NOT NULL,                -- float32 (prompts × dims)
+    scale REAL NOT NULL,
+    bias REAL NOT NULL,
+    created_at TEXT NOT NULL
+);
 -- Trained classifier (trained.py): the latest model per embedding model.
 CREATE TABLE IF NOT EXISTS classifiers (
     id INTEGER PRIMARY KEY,
@@ -128,6 +143,11 @@ CREATE TABLE IF NOT EXISTS examples (
 # Columns added after the first release: (table, column, definition). Applied to older databases.
 MIGRATIONS = [
     ("examples", "qvector", "BLOB"),
+    ("proposals", "suggested_name", "TEXT"),
+    ("proposals", "new_name", "TEXT"),
+    ("proposals", "name_reason", "TEXT"),
+    ("proposals", "name_llm", "TEXT"),
+    ("proposals", "name_hints", "TEXT"),
     ("scans", "max_files", "INTEGER"),
     ("scans", "only_new", "INTEGER NOT NULL DEFAULT 0"),
     ("scans", "inbox_total", "INTEGER NOT NULL DEFAULT 0"),
@@ -156,7 +176,7 @@ MIGRATIONS = [
     ("proposals", "relearned", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
-JSON_FIELDS = ("evidence", "alternatives", "neighbours")
+JSON_FIELDS = ("evidence", "alternatives", "neighbours", "name_llm", "name_hints")
 
 
 def now() -> str:

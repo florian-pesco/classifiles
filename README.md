@@ -5,8 +5,9 @@ learns from the files you have **already sorted**: a new file is proposed for th
 existing files are most similar to it. Anything below the confidence threshold waits for your review.
 Nothing changes on disk until you apply it, and everything can be undone.
 
-In the web UI, similar files are suggested as batches to review together, and every decision you make
-is used right away for the other files of the same scan.
+In the web UI, similar files are suggested as batches to review together, every decision you make is
+used right away for the other files of the same scan, and documents get a cleaner file name suggested
+(`Subject_Type_Detail`).
 
 ```
 inbox file ─► extract (name, type, metadata, text/OCR snippet)

@@ -25,6 +25,9 @@ export interface Proposal {
   suggested_subpath: string | null
   subpath: string | null
   new_folder: string | null
+  suggested_name: string | null // suggested new file name (null: none)
+  new_name: string | null // the name apply will use (null: keep the original)
+  name_reason: string | null
   knn_confidence: number | null
   llm_choice: string | null
   llm_confidence: number | null
@@ -55,7 +58,7 @@ export interface Scan {
   backend: string
   threshold: number
   status: 'running' | 'done' | 'failed'
-  phase: 'classify' | 'second_opinion' | null
+  phase: 'classify' | 'second_opinion' | 'naming' | null
   llm_total: number
   llm_done: number
   llm_error: string | null
@@ -150,6 +153,13 @@ export interface Settings {
   llm_max_files: number
   relearn_in_scan: boolean
   trained_weight: number
+  name_suggestions: boolean
+  name_llm: boolean
+  use_suggested_names: boolean
+  name_transliterate: boolean
+  name_media: boolean
+  name_media_labels: boolean
+  name_media_place: boolean
 }
 
 export interface IndexStatus {
@@ -184,6 +194,7 @@ export interface PlannedMove {
   action: Action | null
   category: string
   subpath: string
+  renamed: boolean
   creates: string | null
   error: string | null
 }
@@ -270,11 +281,13 @@ export const api = {
     call<Scan>('POST', '/api/scans', { inbox, max_files: maxFiles ?? 0, only_new: onlyNew }),
 
   proposals: (scanId: number) => call<Proposal[]>('GET', `/api/proposals?${q({ scan_id: scanId })}`),
-  review: (id: number, action: ReviewAction, folder?: string, subpath?: string) =>
-    call<Proposal & { relearned_others: Proposal[] }>('PATCH', `/api/proposals/${id}`, { action, folder, subpath }),
-  bulkReview: (ids: number[], action: ReviewAction, folder?: string, subpath?: string) =>
+  review: (id: number, action: ReviewAction, folder?: string, subpath?: string,
+           name?: string, useSuggestedName?: boolean) =>
+    call<Proposal & { relearned_others: Proposal[] }>('PATCH', `/api/proposals/${id}`,
+      { action, folder, subpath, name, use_suggested_name: useSuggestedName }),
+  bulkReview: (ids: number[], action: ReviewAction, folder?: string, subpath?: string, useSuggestedName?: boolean) =>
     call<{ updated: Proposal[]; errors: { proposal_id: number; error: string }[]; relearned: Proposal[] }>(
-      'POST', '/api/proposals/bulk', { ids, action, folder, subpath }),
+      'POST', '/api/proposals/bulk', { ids, action, folder, subpath, use_suggested_name: useSuggestedName }),
   reviewBatches: (scanId: number) => call<ReviewBatch[]>('GET', `/api/scans/${scanId}/batches`),
   acceptSuggested: (scanId: number, topLevel = false) =>
     call<{ accepted: number }>('POST', '/api/proposals/accept-suggested', { scan_id: scanId, top_level: topLevel }),

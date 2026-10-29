@@ -32,9 +32,10 @@ class PlannedMove:
     created_dir: Path | None = None  # topmost folder that apply will create (None: all exist)
 
 
-def plan_move(src: str | Path, category: Category, subpath: str = "") -> PlannedMove:
+def plan_move(src: str | Path, category: Category, subpath: str = "", name: str | None = None) -> PlannedMove:
     """Where `src` goes. `subpath` is a folder inside the category ('' = the category folder);
-    missing folders in it are created by execute() and removed again by revert() if empty."""
+    missing folders in it are created by execute() and removed again by revert() if empty.
+    `name`: a new file name (None = keep it). Deleted files always keep their name."""
     src = Path(src)
     if not category.usable:
         raise MoveError(f"Category {category.name!r} is disabled or its folder is missing")
@@ -56,16 +57,19 @@ def plan_move(src: str | Path, category: Category, subpath: str = "") -> Planned
     created = (root / existing / missing[0]) if missing else None
     if not missing and dest_dir.resolve() == src.parent.resolve():
         raise MoveError(f"File is already in {dest_dir}")
-    dst = dest_dir / src.name if missing else free_name(dest_dir / src.name)
+    target = name or src.name
+    dst = dest_dir / target if missing else free_name(dest_dir / target, underscore=bool(name))
     return PlannedMove(src, dst, category.action, created)
 
 
-def free_name(path: Path) -> Path:
-    """`file.pdf` -> `file (1).pdf` -> `file (2).pdf` ... until the name is unused."""
+def free_name(path: Path, underscore: bool = False) -> Path:
+    """`file.pdf` -> `file (1).pdf` -> `file (2).pdf` ... until the name is unused. For suggested
+    names (underscore=True): `Name_Type.pdf` -> `Name_Type_2.pdf` -> `Name_Type_3.pdf`."""
     if not path.exists():
         return path
     for i in range(1, 10_000):
-        candidate = path.with_name(f"{path.stem} ({i}){path.suffix}")
+        candidate = path.with_name(f"{path.stem}_{i + 1}{path.suffix}" if underscore
+                                   else f"{path.stem} ({i}){path.suffix}")
         if not candidate.exists():
             return candidate
     raise MoveError(f"No free name for {path}")

@@ -63,6 +63,7 @@ def settings(tree) -> Settings:
         db_path=":memory:",
         image_similarity=False,  # tests that need it use a fake image model
         trained_weight=0.0,  # tests that need the trained classifier switch it on
+        name_media_labels=False, name_media_place=False,  # no real picture model / town download in tests
     )
 
 

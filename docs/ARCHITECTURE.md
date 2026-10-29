@@ -236,6 +236,58 @@ for each category folder:                                 query text = file name
   On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
   pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
 
+### 4i. Suggested file names (`naming.py`)
+
+- **Shape:** `<Subject>_<Type>_<Detail>.<ext>`, topic first; each part PascalCase, parts joined by `_`,
+  stem ≤ 60 characters, umlauts transliterated (setting), extension lowercase.
+- **Scope** (`in_scope`): documents (pdf/office/text) and pictures that are screenshots or scans
+  (OCR text). Photos, videos, archives, installers and code keep their names, and so do duplicates
+  and Delete.
+- **Rules (at scan time):**
+  - **Clean-up:** copy markers, UUIDs/hex IDs, times, version/"final" tokens.
+  - **Date:** from the text after a date word (`Rechnungsdatum`, `Invoice date`), else from the name,
+    else the first date in the text; German/English/ISO formats, plausibility checked; the
+    modified date is never used.
+  - **Type:** bilingual keyword table (name hits weigh 3, text 1); the type word follows the
+    document's language.
+  - **Subject candidates:** subfolder (not years or generic folders) → sender (`GmbH/AG/Inc …`,
+    non-free-mail domain) → words of the original name → download site.
+  - **Detail:** the date for dated types (invoice, contract, …), else a count token (`Lecture03`, `Blatt04`).
+- **Language model** (`name_llm`, off by default): in the same model session as the second opinion
+  (`run_llm_steps`), for in-scope files with ≥ 150 characters of text. Multiple choice with rotated
+  options: the type among ≤ 5 likely types + "other"; the subject among the rule candidates +
+  "none". It never writes names. The choice is stored in `proposals.name_llm` and survives
+  folder changes. Measured: 0.4 s per file; for 20 real files it gave a type to 10 the rules
+  couldn't type, kept the rules' type for 7 and the first subject candidate for 17.
+- **Review/apply:**
+  - `proposals.suggested_name` / `new_name` (NULL = keep) / `name_reason`;
+  - `review(name=…, use_suggested_name=…)`, with bulk support; a chosen suggestion follows
+    category/folder changes, a typed name stays;
+  - `plan_move(name=…)`; collisions become `_2`, `_3`; undo moves back to the original path.
+
+#### Photos and videos (`naming.suggest_media`, `labels.py`, `places.py`, `extract/video.py`)
+
+- **Shape:** `<original core>_<Title>`.
+  - **Core:** the original stem with copy markers removed, spaces → `_`. A meaningless core
+    (hash, bare number) becomes the date taken.
+  - **Title:** ≤ 2 parts from topic folder → picture recognition → GPS town; the source app
+    (WhatsApp, Signal, Telegram, screen recording) only when nothing else is known. Words already
+    in the core are skipped.
+  - Screenshots and pictures with OCR text stay with the document rules.
+- **Recognition:** zero-shot with the SigLIP2 checkpoint already used for picture similarity.
+  - The ~60 German labels' English prompts (plus 4 "nothing special" prompts) are embedded once
+    with the text tower on the CPU (8 s) and cached in `label_features` with the logit scale.
+  - Each picture is labelled from its existing vector (the vision tower's pooled output equals
+    `get_image_features`); a label needs ≥ 45% softmax share and must beat the null prompts.
+  - Videos: OpenCV middle frame (files ≤ 500 MB).
+- **GPS:** EXIF GPS IFD (`extract/image.py`) and MP4 `©xyz` / Apple ISO 6709 (`extract/video.py`,
+  also `mvhd` creation time). Nearest town from GeoNames `cities15000` (CC BY 4.0, downloaded once
+  to `~/.cache/classifiles/`, 0.5 MB as npz), ≤ 30 km.
+- **Hints** (`proposals.name_hints`: label, share, place, app) are computed at scan time, so a
+  folder change recomputes the name without reading the file again.
+- **Measured** on 97 real inbox photos/videos: 63 get a suggestion, 48 a label (median share 0.73),
+  13 of 13 with GPS a town.
+
 ### 4h. Trained classifier (`trained.py`, `classifiles eval --trained`)
 
 Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
@@ -446,7 +498,7 @@ One SQLite file, four tables:
 | Table | One row per | Key columns |
 |---|---|---|
 | `scans` | scan run | inbox, target_root (the roots at scan time), backend, threshold, max_files, only_new, status (running/done/failed), processed/total, inbox_total |
-| `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder, qvec/ivec (stored vectors), relearned |
+| `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder, qvec/ivec (stored vectors), relearned, suggested_name, new_name, name_reason, name_llm |
 | `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), category_key, created_dir, moved_at, undone_at, purged_at (trash emptied) |
 | `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16), qvector (inbox-style, for training) |
 
@@ -480,7 +532,8 @@ src/classifiles/
   embedder.py          local embedding model with resource caps (lazy, offline after download)
   examples.py          example index: sample folders, build/update, kNN query, learn/forget
   batches.py           batch suggestions for Review (name pattern, similar content, same proposal/doubt)
-  trained.py           experimental trained classifier (logistic regression on inbox-style vectors)
+  trained.py           trained classifier (logistic regression on inbox-style vectors)
+  naming.py            suggested file names (Subject_Type_Detail)
   evaluate.py          hold-out evaluation (`classifiles eval`)
 src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
 src/classifiles_cli/main.py  `classifiles` command (typer)
@@ -529,7 +582,7 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | POST | `/scans` `{inbox?, max_files?, only_new?}` | start a scan in a background thread; returns the scan row. `max_files`: omitted/null = settings default, 0 = all |
 | GET | `/scans`, `/scans/{id}` | list scans / progress of one |
 | GET | `/proposals?scan_id=&status=` | proposals (default: latest scan) |
-| PATCH | `/proposals/{id}` `{action, folder?, subpath?}` | accept / reject / reset; `relearned_others`: proposals updated from this decision |
+| PATCH | `/proposals/{id}` `{action, folder?, subpath?, name?, use_suggested_name?}` | accept / reject / reset; `relearned_others`: proposals updated from this decision |
 | POST | `/proposals/bulk` `{ids, action, folder?, subpath?}` | the same for several; returns `updated`, `errors`, `relearned` |
 | GET | `/scans/{id}/batches` | suggested batches to review together |
 | POST | `/scans/{id}/relearn` | re-score the undecided proposals from the decisions (normally automatic) |
