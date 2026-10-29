@@ -93,3 +93,13 @@ svc.apply(scan_id)
 ```bash
 uv run pytest
 ```
+
+## Contributing
+
+- **Ground rules:** local only (no file names, paths or contents leave the PC); gentle on the
+  hardware (bounded, cancellable, low-priority work, models unloaded when idle); every change to
+  files is reviewable before it happens and can be undone.
+- **One branch and one pull request per change.** PR titles follow `type(scope): title`, e.g.
+  `feat(naming): …`, `fix(duplicates): …`, `docs(usage): …`, `chore(ci): …`.
+- **Classification changes** include before/after numbers from `classifiles eval` (aggregates only).
+- **No personal data** in code, tests, commits or PRs: tests use synthetic files and invented names.
