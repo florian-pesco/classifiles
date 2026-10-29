@@ -31,7 +31,7 @@ export function FileView({ url, name, ext, kind, fallbackText, compact = false }
   return (
     <div className={compact ? 'preview-body compact' : 'preview-body'}>
       {isImage && <img src={url} alt={name} />}
-      {isPdf && <iframe src={url} title={name} />}
+      {isPdf && <iframe src={`${url}#navpanes=0&pagemode=none&view=FitH`} title={name} />}
       {isText && <pre>{text ?? 'Loading…'}</pre>}
       {!isImage && !isPdf && !isText && (
         <div className="no-preview">

@@ -212,7 +212,7 @@ export function SettingsPage({ settings, onSaved, notify, fail }: {
         <h3>Learn from my decisions</h3>
         <p className="muted small">
           When you accept a file in Review, the other undecided files of the same scan are compared again right away,
-          with your decision counted as an extra example. Similar files then follow it (marked "↻ learned"). This
+          with your decision counted as an extra example. Similar files then follow it (marked "updated"). This
           uses what the scan already computed: no file is read again and no model runs. Taking a decision back also
           takes its effect back. Your folders only learn the files for good when you apply.
         </p>

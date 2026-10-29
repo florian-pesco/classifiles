@@ -108,7 +108,7 @@ An inbox folder is never offered as a category, even if it sits inside a root.
      **✕ Keep in inbox**, **↺ Reset**.
    - **Learn from my decisions:** after each decision (single or bulk), the other undecided files of
      this scan are compared again right away, with your decision counted as an extra example. Similar
-     files then follow it: they get the new category and folder, are marked **↻ learned**, and the *Why*
+     files then follow it: they get the new category and folder, are marked **updated**, and the *Why*
      shows "your decision: … → …". A message says how many changed. So deciding one file of a batch
      often fixes the rest; check them and accept. Reset a decision and its effect goes away again.
      This reuses what the scan computed: no file is read again, no model runs. Switch it off in

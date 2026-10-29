@@ -427,6 +427,23 @@ button.linkish.toggle-details { display: inline-flex; align-items: center; gap: 
 .facts-table th, .facts-table td { text-align: left; padding: 7px 10px; border-top: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 .facts-table thead th { border-top: none; color: var(--muted); font-weight: 560; }
 
+/* apply dialog */
+.apply-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.apply-problems { padding: 12px 14px; border-radius: 12px; background: var(--bad-bg); margin-bottom: 16px; }
+.apply-problems h3 { display: flex; align-items: center; gap: 8px; color: var(--bad); margin-bottom: 8px; }
+.apply-problems ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.apply-problems li { display: flex; flex-direction: column; gap: 1px; }
+.apply-groups { display: flex; flex-direction: column; gap: 16px; }
+.apply-group h3 { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.apply-group h3 .ico { color: var(--muted); }
+.apply-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; overflow: hidden; }
+.apply-list li { display: flex; flex-direction: column; gap: 3px; padding: 10px 14px; border-top: 1px solid var(--border); background: var(--surface-2); }
+.apply-list li:first-child { border-top: none; }
+.apply-file { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; min-width: 0; }
+.apply-file > .mono { font-weight: 560; color: var(--text); }
+.apply-rename { display: inline-flex; align-items: center; gap: 6px; color: var(--accent); }
+.apply-where { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--muted); }
+
 /* --- categories, rules, history, settings ------------------------------------------------ */
 .cat-table { display: flex; flex-direction: column; }
 .cat-row {

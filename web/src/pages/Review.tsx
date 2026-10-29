@@ -4,6 +4,7 @@ import {
   type Category, type PlannedMove, type Proposal, type ReviewAction, type ReviewBatch, type Scan, type Settings,
   type Status,
 } from '../api'
+import { ApplyDialog } from '../components/ApplyDialog'
 import { BatchPanel } from '../components/BatchPanel'
 import { BulkBar } from '../components/BulkBar'
 import { CategorySelect } from '../components/CategorySelect'
@@ -14,7 +15,6 @@ import { PageHead } from '../components/PageHead'
 import { NameEditor } from '../components/NameEditor'
 import { PathEditor } from '../components/PathEditor'
 import { PathInput } from '../components/FolderPicker'
-import { Modal } from '../components/Modal'
 import { Preview } from '../components/Preview'
 import { STATUS_LABEL } from '../labels'
 
@@ -79,6 +79,11 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   const [batch, setBatch] = useState<ReviewBatch | null>(null) // list filtered to this batch
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const lastClicked = useRef<number | null>(null)
+  // The list keeps its order while you decide: rows only re-sort (or leave the current filter) when you
+  // change the filter, search or sort, or the whole list is reloaded (new scan, accept all, apply, undo).
+  const [listVersion, setListVersion] = useState(0)
+  const frozen = useRef<{ key: string; ids: number[] } | null>(null)
+  const loadRows = (rows: Proposal[]) => { setProposals(rows); setListVersion(v => v + 1) }
 
   const loadScans = useCallback(async () => {
     const s = await api.scans()
@@ -95,7 +100,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   useEffect(() => {
     if (scanId == null) { setScan(null); setProposals([]); return }
     Promise.all([api.scan(scanId), api.proposals(scanId)])
-      .then(([s, rows]) => { setScan(s); setProposals(rows) })
+      .then(([s, rows]) => { setScan(s); loadRows(rows) })
       .catch(fail)
   }, [scanId, fail])
 
@@ -118,7 +123,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
         setScan(s)
         if (s.status !== 'running') {
           clearInterval(t)
-          setProposals(await api.proposals(s.id))
+          loadRows(await api.proposals(s.id))
           loadScans()
         }
       } catch (e) { fail(e) }
@@ -149,14 +154,20 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     return c
   }, [proposals])
 
+  const viewKey = `${scanId}|${filter}|${search}|${sort}|${batch?.id ?? ''}|${listVersion}`
   const visible = useMemo(() => {
+    const byId = new Map(proposals.map(p => [p.id, p]))
+    if (frozen.current?.key === viewKey) {  // same view: keep the order, even if a row no longer matches
+      return frozen.current.ids.map(id => byId.get(id)).filter((p): p is Proposal => !!p)
+    }
     const needle = search.trim().toLowerCase()
     const inBatch = batch ? new Set(batch.ids) : null
-    const rows = proposals.filter(p => (!inBatch || inBatch.has(p.id)) &&
+    const rows = sortRows(proposals.filter(p => (!inBatch || inBatch.has(p.id)) &&
       (filter === 'all' || (filter === 'duplicates' ? !!p.duplicate_of : p.status === filter)) &&
-      (!needle || p.name.toLowerCase().includes(needle) || (p.final_target ?? '').toLowerCase().includes(needle)))
-    return sortRows(rows, sort)
-  }, [proposals, filter, search, sort, batch])
+      (!needle || p.name.toLowerCase().includes(needle) || (p.final_target ?? '').toLowerCase().includes(needle))), sort)
+    if (rows.length || proposals.length) frozen.current = { key: viewKey, ids: rows.map(p => p.id) }
+    return rows
+  }, [proposals, viewKey, filter, search, sort, batch])
 
   const pickBatch = (b: ReviewBatch | null) => {
     setBatch(b)
@@ -195,7 +206,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     if (!others.length) return
     const moved = others.filter(p => p.relearned).length
     notify(moved
-      ? `Learned from your decision: ${moved} similar file${moved === 1 ? '' : 's'} updated (marked ↻ learned).`
+      ? `Learned from your decision: ${moved} similar file${moved === 1 ? '' : 's'} updated (marked "updated").`
       : `${others.length} suggestion${others.length === 1 ? '' : 's'} went back to the model's own guess.`)
   }
 
@@ -244,7 +255,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       notify(`${verb} ${res.updated.length} file${res.updated.length === 1 ? '' : 's'}`
         + (res.errors.length ? `; ${res.errors.length} failed (${res.errors[0].error})` : '')
         + (res.relearned.filter(p => p.relearned).length
-          ? `; ${res.relearned.filter(p => p.relearned).length} similar files updated from it (↻ learned).` : '.'))
+          ? `; ${res.relearned.filter(p => p.relearned).length} similar files updated from it.` : '.'))
       setSelected(new Set())
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
@@ -253,7 +264,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     if (!scan) return
     try {
       const { accepted } = await api.acceptSuggested(scan.id, topLevel)
-      setProposals(await api.proposals(scan.id))
+      loadRows(await api.proposals(scan.id))
       notify(`Accepted ${accepted} suggested files${topLevel ? ' (category folders only, no subfolders)' : ''}.`)
     } catch (e) { fail(e) }
   }
@@ -273,7 +284,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       const parts = [n('move') && `${n('move')} moved`, n('copy') && `${n('copy')} copied`,
                      n('delete') && `${n('delete')} to trash`].filter(Boolean)
       notify(`${parts.join(', ') || 'Nothing applied'}${res.errors.length ? `, ${res.errors.length} failed` : ''}.`)
-      setProposals(await api.proposals(scan.id))
+      loadRows(await api.proposals(scan.id))
       loadScans()
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
@@ -283,7 +294,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       const res = await api.undo()
       notify(res.batch_id ? `Undid ${res.restored.length} files${res.errors.length ? `, ${res.errors.length} could not be undone` : ''}.`
         : 'Nothing to undo.')
-      if (scan) setProposals(await api.proposals(scan.id))
+      if (scan) loadRows(await api.proposals(scan.id))
     } catch (e) { fail(e) }
   }
 
@@ -364,7 +375,9 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       <nav className="filters" aria-label="Filter by status">
         <div className="seg">
           {FILTERS.map(f => (
-            <button key={f} className={f === filter ? 'active' : ''} onClick={() => setFilter(f)} aria-pressed={f === filter}>
+            <button key={f} className={f === filter ? 'active' : ''} aria-pressed={f === filter}
+                    onClick={() => (f === filter ? setListVersion(v => v + 1) : setFilter(f))}
+                    title={f === filter ? 'Click again to re-sort the list' : undefined}>
               {f === 'all' ? 'All' : STATUS_LABEL[f]}<span className="count">{counts[f] ?? 0}</span>
             </button>
           ))}
@@ -454,31 +467,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
                           onDecide={(p, d) => (d === 'delete' ? review(p, 'accept', p.final_target ?? undefined) : review(p, 'reject'))} />
       )}
 
-      {plan && (
-        <Modal title="Apply these changes?" onClose={() => setPlan(null)} wide>
-          <ul className="plan">
-            {plan.map(m => (
-              <li key={m.proposal_id} className={m.error ? 'bad' : ''}>
-                <span>
-                  <span className={`badge act-${m.action ?? 'none'}`}>
-                    {m.action === 'delete' ? 'to trash' : m.action ?? 'error'}
-                  </span>{' '}
-                  <span className="mono">{m.src.split('/').pop()}</span>
-                </span>
-                <span className="muted mono small">{m.error ?? `→ ${m.dst}`}</span>
-                {m.renamed && m.dst && <span className="small">renamed to <span className="mono">{m.dst.split('/').pop()}</span></span>}
-                {m.creates && <span className="small warn-text">creates new folder <span className="mono">{m.creates}</span></span>}
-              </li>
-            ))}
-          </ul>
-          <div className="modal-actions">
-            <button onClick={() => setPlan(null)}>Cancel</button>
-            <button className="primary" onClick={confirmApply} disabled={busy || plan.every(m => m.error)}>
-              Apply {plan.filter(m => !m.error).length} files
-            </button>
-          </div>
-        </Modal>
-      )}
+      {plan && <ApplyDialog plan={plan} busy={busy} onCancel={() => setPlan(null)} onApply={confirmApply} />}
     </div>
   )
 }
@@ -514,8 +503,9 @@ function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, o
         <div className="file-name">
           <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open} title={p.name}>{p.name}</button>
           {p.relearned === 1 && !done && (
-            <span className="badge learned plain" title="Updated from your decisions in this scan (see details)">
-              <Icon name="learn" size={12} />learned
+            <span className="badge learned plain"
+                  title="Changed by a decision you made in this scan: a similar file you sorted moved this suggestion. Open details to see which.">
+              <Icon name="learn" size={12} />updated
             </span>
           )}
         </div>
