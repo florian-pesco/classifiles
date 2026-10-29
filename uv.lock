@@ -63,6 +63,7 @@ all = [
     { name = "pypdfium2" },
     { name = "rapidocr-onnxruntime" },
     { name = "rich" },
+    { name = "scikit-learn" },
     { name = "sentence-transformers" },
     { name = "typer" },
     { name = "uvicorn", extra = ["standard"] },
@@ -77,6 +78,7 @@ cli = [
 ]
 examples = [
     { name = "numpy" },
+    { name = "scikit-learn" },
     { name = "sentence-transformers" },
 ]
 laya = [
@@ -108,6 +110,7 @@ requires-dist = [
     { name = "pyyaml", specifier = ">=6" },
     { name = "rapidocr-onnxruntime", marker = "extra == 'ocr'", specifier = ">=1.4" },
     { name = "rich", marker = "extra == 'cli'", specifier = ">=13" },
+    { name = "scikit-learn", marker = "extra == 'examples'", specifier = ">=1.5" },
     { name = "sentence-transformers", marker = "extra == 'examples'", specifier = ">=5.0" },
     { name = "typer", marker = "extra == 'cli'", specifier = ">=0.15" },
     { name = "uvicorn", extras = ["standard"], marker = "extra == 'api'", specifier = ">=0.32" },

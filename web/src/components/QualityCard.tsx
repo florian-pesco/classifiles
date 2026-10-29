@@ -56,6 +56,17 @@ export function QualityCard({ fail }: { fail: (e: unknown) => void }) {
             ))}
             {q.current && <Line label="Current model re-run on the same files" s={q.current} />}
           </ul>
+          {q.mix && (
+            <>
+              <p className="small muted">
+                With the trained model (each file hidden from training, as if it were new; every other decision known):
+              </p>
+              <ul className="simple-list">
+                <Line label="Similar files only" s={q.mix.neighbours} />
+                <Line label={`Similar files + trained model (${Math.round(q.mix.weight * 100)}%, your setting)`} s={q.mix.mixed} />
+              </ul>
+            </>
+          )}
           {q.current?.calibration && (
             <p className="small muted">
               Current model by confidence:{' '}

@@ -19,7 +19,7 @@ from typing import Callable
 from .classifier import Classifier
 from .deciders import make_decider
 from .deciders.examples import ExampleDecider
-from .examples import category_key
+from .examples import DELETE_KEY, category_key
 from .extract.base import Evidence
 from .source import download_sources
 
@@ -104,7 +104,7 @@ def evaluate(service, backends: list[str], per_category: int = 30, seed: int = 0
 def decided_proposals(service) -> list[dict]:
     """Proposals you decided in Review (accepted, overridden or applied), excluding rule hits."""
     return service.store.query("""
-        SELECT p.id, p.evidence, p.target, p.final_target, p.confidence, p.alternatives, p.decided_via,
+        SELECT p.id, p.evidence, p.target, p.final_target, p.confidence, p.alternatives, p.decided_via, p.source,
                s.backend, m.dst, m.action, m.category_key
         FROM proposals p
         JOIN scans s ON s.id = p.scan_id
@@ -168,6 +168,11 @@ def evaluate_decisions(service, rerun: bool = True) -> dict:
             current.append({"true": r["final_target"], "pred": c.target, "confidence": c.confidence,
                             "top3": [a["folder"] for a in c.alternatives[:3]], "via": r["decided_via"] or "unknown"})
         out["current"] = summarize(current, by_via=True)
+        w = service.settings.trained_weight
+        if w > 0 and service.settings.backend == "examples":
+            # the trained mix, measured honestly (5 folds; each file hidden from training)
+            res = evaluate_trained(service, splits=(), decisions=True, blends=(w,))["decisions"]["results"]
+            out["mix"] = {"weight": w, "neighbours": res["neighbours"], "mixed": res[f"blend {w}"]}
     return out
 
 
@@ -394,3 +399,124 @@ def evaluate_images(service, per_category: int = 40, seed: int = 0, split: str =
         out[w] = {"accuracy": s["accuracy"], "per_category": s["per_category"], "calibration": s["calibration"],
                   "thresholds": s["thresholds"]}
     return {"pictures": len(cases), "split": split, "by_weight": out}
+
+
+# --- trained classifier ----------------------------------------------------------------
+
+BLENDS = (0.25, 0.5, 0.75)
+
+
+def _decision_cases(service) -> list[dict]:
+    """Real decisions with the example ids that are this file (as scanned example at its new place,
+    and as learned example), so a fold can leave exactly those out of training."""
+    from .service import _learned_key
+
+    # duplicates are decided by being identical to another file, not by what they are about
+    rows = [r for r in decided_proposals(service) if r["source"] != "duplicate"]
+    examples = service.store.query("SELECT id, category_key, relpath, origin FROM examples WHERE model = ?",
+                                   (service.settings.embedding_model,))
+    by_path = {os.path.normpath(os.path.join(e["category_key"], e["relpath"])): e["id"]
+               for e in examples if e["origin"] == "scan"}
+    by_learned = {(e["category_key"], e["relpath"]): e["id"] for e in examples if e["origin"] == "applied"}
+    fields = Evidence.__dataclass_fields__
+    cases = []
+    for r in rows:
+        own = set()
+        if r["dst"]:
+            if os.path.normpath(r["dst"]) in by_path:
+                own.add(by_path[os.path.normpath(r["dst"])])
+            learned = by_learned.get(_learned_key(r["dst"], r["action"], r["category_key"]))
+            if learned:
+                own.add(learned)
+        cases.append({"ev": Evidence(**{k: v for k, v in r["evidence"].items() if k in fields}),
+                      "true": r["final_target"], "own": own})
+    return cases
+
+
+def evaluate_trained(service, per_category: int = 40, seed: int = 0, splits: tuple[str, ...] = SPLITS,
+                     decisions: bool = True, folds: int = 5, applied_weight: float = 3.0,
+                     blends: tuple[float, ...] = BLENDS,
+                     progress: Callable[[str, int, int], None] | None = None) -> dict:
+    """Compare the nearest-neighbour vote, the trained classifier and blends of both.
+
+    Honest by construction: neither method may see a test file. Held-out splits: both hide all
+    held-out files; in the folder split also the test file's folder (the trained model, fitted once
+    per fold, hides the folders of all test files of that fold). Real decisions: each file hides its
+    own examples (scanned at its new place, learned), like in real use where all other decisions are
+    known. The trained model is fitted `folds` times. Aggregates only."""
+    from . import trained as tr
+
+    service.check_ready()
+    cats = [c for c in service.categories(refresh=True) if c.usable and c.suggest]
+    index = service.example_index()
+    if progress:
+        progress("inbox-style vectors", 0, 1)
+    index.fill_query_vectors(cats)
+    service.fill_applied_query_vectors()
+    by_key = {category_key(c): c.name for c in cats}
+    # Delete stays with the neighbour vote (see trained.py)
+    rows = index.training_rows({k for k in by_key if k != DELETE_KEY})
+    if not rows:
+        raise ValueError("Nothing to train on: build the example index first.")
+    decider = ExampleDecider(service.example_index())
+    threads = service.settings.cpu_threads
+
+    def run(cases: list[dict], knn_exclude: Callable[[dict], set], train_exclude: Callable[[list[dict]], set],
+            label: str) -> dict:
+        rng = random.Random(seed)
+        order = list(range(len(cases)))
+        rng.shuffle(order)
+        fold_of = {i: n % folds for n, i in enumerate(order)}
+        out = {"neighbours": [], "trained": [], **{f"blend {a}": [] for a in blends}}
+        C = T = None
+        for f in range(folds):
+            test = [i for i in range(len(cases)) if fold_of[i] == f]
+            if not test:
+                continue
+            X, y, w = tr.training_set(rows, train_exclude([cases[i] for i in test]), applied_weight)
+            if C is None:
+                C, _ = tr.choose_C(X, y, w, threads=threads, seed=seed)
+                T = tr.fit_temperature(X, y, w, C, threads=threads, seed=seed)
+            model = tr.fit(X, y, w, C, threads)
+            model.temperature = T
+            for n, i in enumerate(test, 1):
+                if progress:
+                    progress(f"{label}: fold {f + 1}/{folds}", n, len(test))
+                case = cases[i]
+                p_knn, _, extras = decider.classify_evidence(case["ev"], cats, exclude_ids=knn_exclude(case))
+                p_tr = {by_key[k]: p for k, p in model.probs(extras["vector"]).items() if k in by_key}
+                variants = {"neighbours": p_knn, "trained": p_tr,
+                            **{f"blend {a}": tr.blend(p_knn, p_tr, a) for a in blends}}
+                for name, p in variants.items():
+                    ranked = sorted(p.items(), key=lambda kv: kv[1], reverse=True)
+                    out[name].append({"true": case["true"], "pred": ranked[0][0], "confidence": ranked[0][1],
+                                      "top3": [k for k, _ in ranked[:3]]})
+        return {"C": C, "temperature": T, "results": {name: summarize(r) for name, r in out.items()}}
+
+    result: dict = {"training_examples": len(rows), "folds": folds, "applied_weight": applied_weight,
+                    "per_category_examples": dict(Counter(by_key[r["category_key"]] for r in rows))}
+    if splits:
+        holdout = pick_holdout(service, per_category, seed)
+        sources = download_sources([h["path"] for h in holdout]) if service.settings.use_download_source else {}
+        held = {h["id"] for h in holdout}
+        siblings = _sibling_ids(service, holdout) if "folder" in splits else {}
+        cases = []
+        for i, h in enumerate(holdout, 1):
+            if progress:
+                progress("reading files", i, len(holdout))
+            cases.append({**h, "ev": service.read_file(h["path"], sources.get(h["path"])), "true": h["category"]})
+        for split in splits:
+            if split == "folder":
+                knn_ex = lambda c: held | siblings.get(c["id"], set())
+                train_ex = lambda test: held.union(*(siblings.get(c["id"], set()) for c in test))
+            else:
+                knn_ex = lambda c: held
+                train_ex = lambda test: held
+            result[f"{split} split"] = run(cases, knn_ex, train_ex, f"{split} split")
+        result["files"] = len(holdout)
+    if decisions:
+        cases = _decision_cases(service)
+        if cases:  # like real use: every other decision is known, only the file itself is hidden
+            result["decisions"] = run(cases, lambda c: c["own"], lambda test: set().union(*(c["own"] for c in test)),
+                                      "decisions")
+    return result

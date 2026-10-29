@@ -221,6 +221,9 @@ def eval_(
     decisions: bool = typer.Option(False, "--decisions", help="Measure against your real Review decisions instead"),
     second_opinion: bool = typer.Option(False, "--second-opinion",
                                         help="Measure the language model hint on unsure files (decisions + folder split)"),
+    trained: bool = typer.Option(False, "--trained",
+                                 help="Compare the neighbour vote with a trained classifier and blends (both splits + decisions)"),
+    details: bool = typer.Option(False, "--details", help="With --trained: full tables per method"),
     seed: int = 0,
     config: Optional[Path] = ConfigOpt,
 ):
@@ -242,6 +245,20 @@ def eval_(
                           f"language model right {a['disagree_llm_right']}\n")
             svc = _service(config)  # fresh service: the embedder was unloaded for the model
         return
+    if trained:
+        from classifiles.evaluate import evaluate_trained
+
+        with Progress(console=console, transient=True) as progress:
+            task = progress.add_task("…", total=None)
+            report = evaluate_trained(svc, per_category, seed, tuple(split),
+                                      progress=lambda what, i, n: progress.update(task, description=what,
+                                                                                  completed=i, total=n))
+        console.print(f"[bold]Trained classifier vs. neighbour vote[/]: {report['training_examples']} training "
+                      f"examples, {report['folds']} folds, learned examples weighted {report['applied_weight']}×\n")
+        for section in ("file split", "folder split", "decisions"):
+            if section in report:
+                _print_comparison(section, report[section], details)
+        return
     if decisions:
         report = evaluate_decisions(svc)
         console.print(f"[bold]{report['decisions']} decided files[/] (how: {report['decided_via']})\n")
@@ -257,6 +274,25 @@ def eval_(
     console.print(f"[bold]{report['files']} held-out files[/] ({per_category} per category)\n")
     for name, r in report["results"].items():
         _print_summary(name, r)
+
+
+def _print_comparison(section: str, sec: dict, details: bool) -> None:
+    results = sec["results"]
+    n = next(iter(results.values())).get("files", 0)
+    t = Table("method", "accuracy", "top-3", "≥0.7: suggested / right", "≥0.9: suggested / right", "weakest category",
+              title=f"{section} ({n} files, C={sec['C']}, T={sec.get('temperature')})")
+    for name, r in results.items():
+        if not r.get("files"):
+            continue
+        th = {x["threshold"]: x for x in r["thresholds"]}
+        fmt = lambda x: f"{x['suggested']:.0%} / " + ("—" if x["accuracy"] is None else f"{x['accuracy']:.0%}")
+        weakest = min(r["per_category"].values(), key=lambda v: v["recall"])["recall"]
+        t.add_row(name, f"{r['accuracy']:.0%}", f"{r['top3']:.0%}", fmt(th[0.7]), fmt(th[0.9]), f"{weakest:.0%}")
+    console.print(t)
+    if details:
+        for name, r in results.items():
+            _print_summary(f"{section}: {name}", r)
+    console.print()
 
 
 def _print_summary(name: str, r: dict) -> None:

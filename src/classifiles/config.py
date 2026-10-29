@@ -82,6 +82,8 @@ class Settings:
     image_model: str = "google/siglip2-base-patch16-224"
     images_per_category: int = 300
     image_weight: float = 0.5           # 0 = text only, 1 = image similarity only (for images)
+    # Trained classifier (trained.py) mixed with the similar-files vote: 0 = similar files only.
+    trained_weight: float = 0.5
     # Learn from my decisions: after each decision in Review, undecided files of the same scan are
     # re-scored with the decided files as temporary examples (no file access, no model run).
     relearn_in_scan: bool = True

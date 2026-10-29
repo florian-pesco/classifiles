@@ -236,6 +236,56 @@ for each category folder:                                 query text = file name
   On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
   pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
 
+### 4h. Trained classifier (`trained.py`, `classifiles eval --trained`)
+
+Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
+
+- **Why:** the neighbour vote asks the 20 nearest examples. A trained model learns from all examples
+  at once what separates the categories, which may generalise better to new topics (folder split).
+- **Inbox-style vectors:** the stored example vector is made from `folder: <category>/… · file · type ·
+  content` (`doc_text`). The folder text contains the answer, and inbox files have no folder, so a
+  model trained on it would learn to read the folder name. Every example therefore also gets
+  `examples.qvector`: the same file embedded exactly like an inbox file (`inbox_text`, query
+  instruction, no folder).
+  - New and changed examples get both vectors during the index build.
+  - Older ones are filled by **Update index**: name-only examples from the stored path, with no disk
+    access; examples with read text are read once more.
+  - Learned examples are filled from the proposal's stored evidence (`fill_applied_query_vectors`).
+- **Model:** multinomial logistic regression (scikit-learn, lbfgs) on the 1024-dim inbox-style vectors.
+  - Categories are balanced (n / (classes · n_class)), and learned examples count `applied_weight`
+    (default 3).
+  - C is chosen from {0.3, 1, 3, 10} by 3-fold CV on balanced accuracy; a temperature (calibration)
+    is fitted on cross-validated predictions.
+  - Delete is not trained. Its examples are the only real inbox files, so the model learned "looks
+    like a download → Delete". The blend keeps the neighbour probability for Delete.
+  - Training takes under a second on 2 CPU threads.
+- **Evaluation:** `evaluate_trained` runs the file split, the folder split and real decisions, with
+  5 folds.
+  - The model is fitted per fold without that fold's test files: in the splits without all held-out
+    files, plus the test files' folders in the folder split; for decisions, without each file's own
+    scanned and learned examples.
+  - The neighbour vote hides the same files.
+  - Real decisions skip duplicates: they are decided by being identical to another file, not by content.
+  - Compared: neighbours, trained, and blends `P ∝ P_knn^(1−a) · P_trained^a`, a ∈ {0.25, 0.5, 0.75}.
+  - A test asserts that no training run contains a test file.
+- **In use:**
+  - `ExampleDecider.score` blends the text neighbour vote with the trained probabilities
+    (`P ∝ P_knn^(1−w) · P_trained^w`, Delete keeps the neighbour probability); pictures are blended
+    on top as before.
+  - Subfolders, "learn from my decisions" and the reasons still come from the neighbours; the reason
+    starts with "trained model: X 82%".
+  - The model is stored in table `classifiers` (one per embedding model).
+  - `service.retrain()` runs in the index thread after **Update index**, debounced 30 s after apply
+    or undo, once on first use if none exists, and on request (`POST /api/index/retrain`). It
+    takes seconds on 2 threads at nice 10. With the drive unmounted there are no categories, so it
+    keeps the old model.
+  - The Quality card's re-check adds "similar files only" vs. "with the trained model", measured
+    with 5 folds, each file hidden from training.
+- **Measured on real data** (aggregates):
+  - new topics (folder split) 70% → 76% right, wrong suggestions at 0.7 down from 13% to 8% of files;
+  - real decisions 83% → 81% (within noise);
+  - single held-out files 78% → 85%.
+
 ### 4g. Batches and learning from decisions (`batches.py`, `service.relearn`)
 
 - **Stored vectors.** Each example-model proposal keeps the vectors computed during the scan
@@ -398,7 +448,7 @@ One SQLite file, four tables:
 | `scans` | scan run | inbox, target_root (the roots at scan time), backend, threshold, max_files, only_new, status (running/done/failed), processed/total, inbox_total |
 | `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder, qvec/ivec (stored vectors), relearned |
 | `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), category_key, created_dir, moved_at, undone_at, purged_at (trash emptied) |
-| `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16) |
+| `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16), qvector (inbox-style, for training) |
 
 You can inspect it directly:
 
@@ -430,6 +480,7 @@ src/classifiles/
   embedder.py          local embedding model with resource caps (lazy, offline after download)
   examples.py          example index: sample folders, build/update, kNN query, learn/forget
   batches.py           batch suggestions for Review (name pattern, similar content, same proposal/doubt)
+  trained.py           experimental trained classifier (logistic regression on inbox-style vectors)
   evaluate.py          hold-out evaluation (`classifiles eval`)
 src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
 src/classifiles_cli/main.py  `classifiles` command (typer)
@@ -474,6 +525,7 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | GET / POST | `/trash`, `/trash/empty` | trash contents / delete permanently |
 | GET | `/index` | example index: build status, example counts per category |
 | POST | `/index/build`, `/index/cancel` | start (background) / cancel an index build |
+| POST | `/index/retrain` | train the classifier again now (background) |
 | POST | `/scans` `{inbox?, max_files?, only_new?}` | start a scan in a background thread; returns the scan row. `max_files`: omitted/null = settings default, 0 = all |
 | GET | `/scans`, `/scans/{id}` | list scans / progress of one |
 | GET | `/proposals?scan_id=&status=` | proposals (default: latest scan) |

@@ -18,10 +18,13 @@ DECIDED = "@decided:"  # relpath prefix of temporary examples (files decided in 
 class ExampleDecider:
     name = "examples"
 
-    def __init__(self, index: ExampleIndex, image_index=None, image_weight: float = 0.5):
+    def __init__(self, index: ExampleIndex, image_index=None, image_weight: float = 0.5, trained=None,
+                 trained_weight: float = 0.0):
         self.index = index
         self.image_index = image_index  # optional: image similarity for pictures (image_index.py)
         self.image_weight = image_weight
+        self.trained = trained  # optional: trained classifier (trained.py), mixed in with trained_weight
+        self.trained_weight = trained_weight
 
     def classify_evidence(self, ev: Evidence, categories: list[Category], exclude_ids: set[int] | None = None,
                           image_exclude_ids: set[int] | None = None) -> tuple[dict[str, float], str, dict]:
@@ -62,6 +65,17 @@ class ExampleDecider:
         nbs = [self._neighbour(by_key, n.category_key, n.relpath, n.weight) for n in neighbours if n.relpath]
         similar = [f"{self._label(by_key, n.category_key, n.relpath)} ({n.similarity:.2f})" for n in neighbours[:3]]
         reason = "similar to: " + "; ".join(similar) if similar else ""
+
+        if self.trained is not None and self.trained_weight > 0:
+            from ..trained import blend
+
+            p_tr = {k: p for k, p in self.trained.probs(vec).items() if k in by_key}
+            if p_tr:
+                total = sum(p_tr.values()) or 1.0
+                p_tr = {k: p / total for k, p in p_tr.items()}
+                probs_by_key = blend({k: probs_by_key.get(k, 0.0) for k in by_key}, p_tr, self.trained_weight)
+                top = max(p_tr, key=p_tr.get)
+                reason = f"trained model: {by_key[top].name} {p_tr[top]:.0%}" + ("; " + reason if reason else "")
 
         if ivec is not None and self.image_index is not None and (self.image_index.size or image_extra):
             p_img, img_nbs = self.image_index.query(ivec, set(by_key), image_exclude_ids, extra=image_extra,

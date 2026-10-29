@@ -128,7 +128,7 @@ def test_apply_trashes_duplicate_without_learning_and_keeps_catalog_current(serv
     service.review(by["a.txt"]["id"], "accept", "Work", subpath="")
     service.apply(scan_id)
     assert (tree["inbox"] / ".classifiles-trash" / "a (1).txt").exists()
-    assert [rel for _, rel, _ in learned] == ["a.txt"]  # the duplicate was not learned
+    assert [it[1] for it in learned] == ["a.txt"]  # the duplicate was not learned
     assert service.store.one("SELECT full_hash FROM catalog WHERE relpath = 'a.txt'")["full_hash"]
     service.undo()
     assert service.store.one("SELECT id FROM catalog WHERE relpath = 'a.txt'") is None

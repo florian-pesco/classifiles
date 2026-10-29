@@ -17,7 +17,7 @@ from .embedder import Embedder
 from . import llm
 from .duplicates import Catalog, find_duplicates
 from .image_index import ImageEmbedder, ImageIndex, is_image
-from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text
+from .examples import DELETE_KEY, ExampleIndex, category_key, doc_text, inbox_text
 from .extract import extract
 from .mover import MoveError, execute, plan_move, purge, revert
 from .paths import normalize_subpath, numbered_sibling, suggest_folder_name, suggest_subpath
@@ -52,6 +52,12 @@ class ClassifilesService:
         self.store = store or Store(self.settings.db_path)
         self._catalog = Catalog(self.store)
         self._image_index: ImageIndex | None = None
+        self._trained = None  # (embedding model, TrainedModel | None), loaded lazily
+        self._trained_status: dict = {"state": "idle"}
+        self._train_lock = threading.Lock()
+        self._train_timer: threading.Timer | None = None
+        self._auto_trained = False
+        self.retrain_delay = 30.0  # seconds after an apply/undo before retraining (debounced)
 
     # --- categories, rules & model -----------------------------------------------------------
 
@@ -119,13 +125,86 @@ class ClassifilesService:
         if self._decider is None:
             if self.settings.backend == "examples":
                 images = self.image_index() if self.settings.image_similarity else None
-                self._decider = ExampleDecider(self.example_index(), images, self.settings.image_weight)
+                trained = self.trained_model() if self.settings.trained_weight > 0 else None
+                self._decider = ExampleDecider(self.example_index(), images, self.settings.image_weight,
+                                               trained, self.settings.trained_weight)
+                if trained is None and self.settings.trained_weight > 0 and not self._auto_trained:
+                    self._auto_trained = True  # first use with an index but no model yet: train once
+                    self.schedule_retrain(0)
             else:
                 self._decider = make_decider(self.settings.backend, laya_model=self.settings.laya_model)
         return self._decider
 
     def reset_decider(self) -> None:
         self._decider = None
+
+    # --- trained classifier ----------------------------------------------------------------
+
+    def trained_model(self):
+        """The stored trained classifier for the current embedding model, or None."""
+        from .trained import from_row
+
+        model = self.settings.embedding_model
+        if self._trained is None or self._trained[0] != model:
+            row = self.store.one("SELECT * FROM classifiers WHERE model = ? ORDER BY id DESC LIMIT 1", (model,))
+            self._trained = (model, from_row(row) if row else None)
+        return self._trained[1]
+
+    def retrain(self) -> dict:
+        """Train the classifier on the inbox-style example vectors (CPU, a few seconds) and store it.
+        Delete is left to the similar-files vote (see trained.py)."""
+        from .trained import to_row, train
+
+        if not self._train_lock.acquire(blocking=False):
+            return self._trained_status  # already training
+        try:
+            self._trained_status = {"state": "running", "started_at": now()}
+            cats = [c for c in self.categories() if c.usable and c.suggest and c.path]
+            rows = self.example_index().training_rows({category_key(c) for c in cats})
+            m = train(rows, threads=self.settings.cpu_threads)
+            if m is None:
+                self._trained_status = {"state": "idle", "message": "not enough examples to train yet"}
+                return self._trained_status
+            model = self.settings.embedding_model
+            self.store.execute("DELETE FROM classifiers WHERE model = ?", (model,))
+            self.store.insert("classifiers", to_row(m, model, now()))
+            self._trained = (model, m)
+            self.reset_decider()
+            self._trained_status = {"state": "done", "finished_at": now()}
+        except Exception as e:  # noqa: BLE001 - shown in the UI
+            log.exception("training the classifier failed")
+            self._trained_status = {"state": "failed", "error": str(e)[:300]}
+        finally:
+            self._train_lock.release()
+        return self._trained_status
+
+    def schedule_retrain(self, delay: float | None = None) -> None:
+        """Retrain in the background after `delay` seconds; a newer request replaces a pending one."""
+        if self.settings.backend != "examples":
+            return
+        if self._train_timer is not None:
+            self._train_timer.cancel()
+
+        def run():
+            try:
+                os.nice(10)
+            except OSError:
+                pass
+            self.retrain()
+
+        self._train_timer = threading.Timer(self.retrain_delay if delay is None else delay, run)
+        self._train_timer.daemon = True
+        self._train_timer.start()
+
+    def trained_status(self) -> dict:
+        m = self.trained_model()
+        row = self.store.one("SELECT created_at FROM classifiers WHERE model = ? ORDER BY id DESC LIMIT 1",
+                             (self.settings.embedding_model,))
+        names = {category_key(c): c.name for c in self.categories()}
+        return {**self._trained_status, "weight": self.settings.trained_weight, "trained": m is not None,
+                "trained_at": row["created_at"] if row else None,
+                "examples": sum(m.n_train.values()) if m else 0,
+                "categories": [names.get(k, k) for k in m.keys] if m else []}
 
     # --- example index ------------------------------------------------------------------
 
@@ -160,12 +239,15 @@ class ClassifilesService:
         images = self.image_index() if self.settings.image_similarity else None
 
         def after():  # same background thread, after the text index
+            _quietly(self.fill_applied_query_vectors)
+            if self.settings.trained_weight > 0:
+                self.retrain()
             if catalog:
                 self._catalog.build(cats)
             if images is not None:
                 images.build(cats)
 
-        index.start_build(cats, on_done=after if (catalog or images is not None) else None)
+        index.start_build(cats, on_done=after)
         return self.index_status()
 
     def _image_status(self) -> dict:
@@ -202,7 +284,7 @@ class ClassifilesService:
         return {"status": index.status, "model": index.embedder.model_name,
                 "model_loaded": index.embedder.loaded, "total": sum(sum(v.values()) for v in counts.values()),
                 "categories": per_category, "unlearned": len(self.unlearned_decisions()),
-                "images": self._image_status(),
+                "images": self._image_status(), "trained": self.trained_status(),
                 "catalog": {**self._catalog.status, "files": self._catalog.count(),
                             "enabled": self._catalog_wanted()}}
 
@@ -236,8 +318,30 @@ class ClassifilesService:
             if (key, rel) in learned:
                 continue
             out.append((key, rel, doc_text(_learned_folder(key, rel), r["name"], r["kind"],
-                                           r["evidence"].get("text", ""))))
+                                           r["evidence"].get("text", "")),
+                        _inbox_text(r["name"], r["kind"], r["evidence"])))
         return out
+
+    def fill_applied_query_vectors(self) -> int:
+        """Inbox-style vectors for learned examples that were added before they existed, from the
+        stored evidence (no file access). Returns how many were filled."""
+        index = self.example_index()
+        missing = {(r["category_key"], r["relpath"]): r["id"] for r in self.store.query(
+            "SELECT id, category_key, relpath FROM examples WHERE origin = 'applied' AND model = ? "
+            "AND qvector IS NULL", (self.settings.embedding_model,))}
+        if not missing:
+            return 0
+        todo = {}
+        for r in self.store.query("""
+                SELECT m.dst, m.action, m.category_key, p.name, p.kind, p.evidence FROM moves m
+                JOIN proposals p ON p.id = m.proposal_id WHERE m.undone_at IS NULL"""):
+            eid = missing.get(_learned_key(r["dst"], r["action"], r["category_key"]))
+            if eid is not None:
+                todo[eid] = _inbox_text(r["name"], r["kind"], r["evidence"])
+        if todo:
+            ids = list(todo)
+            index.set_query_vectors(list(zip(ids, index.embedder.encode([todo[i] for i in ids], query=True))))
+        return len(todo)
 
     def learn_past_decisions(self) -> dict:
         """Backfill: learn every applied file that was applied without learning (e.g. while another
@@ -245,7 +349,7 @@ class ClassifilesService:
         items = self.unlearned_decisions()
         self.example_index().add(items)
         by = {}
-        for key, _, _ in items:
+        for key, *_ in items:
             kind = "delete" if key == DELETE_KEY else "move/copy"
             by[kind] = by.get(kind, 0) + 1
         return {"learned": len(items), "by_action": by}
@@ -820,13 +924,16 @@ class ClassifilesService:
             key, rel = _learned_key(str(m.dst), m.action, cat_key)
             if p["source"] != "duplicate":  # a duplicate isn't junk by its kind: don't learn it as Delete
                 learned.append((key, rel, doc_text(_learned_folder(key, rel), p["name"], p["kind"],
-                                                   p["evidence"].get("text", ""))))
+                                                   p["evidence"].get("text", "")),
+                                _inbox_text(p["name"], p["kind"], p["evidence"])))
             if m.action != "delete" and key != DELETE_KEY:
                 self._catalog.add(key, rel, m.dst, p.get("content_hash"))
             if m.created_dir:
                 self.invalidate()  # a new folder exists now: refresh the cached categories
         self._learn(learned)
         self._learn_images(moved)
+        if learned and self.settings.trained_weight > 0:
+            self.schedule_retrain()
         return {"batch_id": batch_id if moved else None, "moved": moved, "errors": errors}
 
     def _learn_images(self, moved: list[dict]) -> None:
@@ -889,6 +996,8 @@ class ClassifilesService:
         self._forget(forget)
         if self._image_index is not None:
             self._image_index.remove([f for f in forget if f[0] != DELETE_KEY])
+        if forget and self.settings.trained_weight > 0:
+            self.schedule_retrain()
         return {"batch_id": batch_id, "restored": restored, "errors": errors}
 
     # --- trash --------------------------------------------------------------------------
@@ -929,6 +1038,12 @@ def _learned_key(dst: str, action: str, cat_key: str | None = None) -> tuple[str
         except ValueError:
             pass
     return str(p.parent), p.name
+
+
+def _inbox_text(name: str, kind: str, evidence: dict) -> str:
+    """Inbox-style text of a decided file, from its stored evidence."""
+    meta = evidence.get("meta") or {}
+    return inbox_text(name, kind, evidence.get("text", ""), meta.get("looks_like"), meta.get("source"))
 
 
 def _learned_folder(key: str, relpath: str) -> str:

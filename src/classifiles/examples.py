@@ -57,13 +57,18 @@ def doc_text(folder: str, name: str, kind: str, content: str = "") -> str:
 
 def query_text(ev: Evidence) -> str:
     """Text of a file to classify (the 'query' side): no folder, it has none yet."""
-    t = f"file: {ev.name}\ntype: {ev.kind}"
-    looks = ev.meta.get("looks_like")
+    return inbox_text(ev.name, ev.kind, ev.text, ev.meta.get("looks_like"), ev.meta.get("source"))
+
+
+def inbox_text(name: str, kind: str, content: str = "", looks: str | None = None, source: str | None = None) -> str:
+    """The query-side text from its parts. Also used for sorted files (examples), so a trained
+    classifier sees them exactly like inbox files: without the folder, which would give the answer away."""
+    t = f"file: {name}\ntype: {kind}"
     if looks:
         t += f" ({looks})"
-    if ev.meta.get("source"):
-        t += f"\nsource: {ev.meta['source']}"
-    return t + (f"\ncontent: {ev.text[:SNIPPET_CHARS]}" if ev.text else "")
+    if source:
+        t += f"\nsource: {source}"
+    return t + (f"\ncontent: {content[:SNIPPET_CHARS]}" if content else "")
 
 
 def description_text(c: Category) -> str:
@@ -269,6 +274,7 @@ class ExampleIndex:
                     continue
                 self._progress(category=c.name, message=f"listing {c.name} ({i + 1}/{len(cats)})", done=0, total=0)
                 self._index_category(c)
+                self._fill_query_vectors(c)
             self.load()
             state = "cancelled" if self._cancel.is_set() else "done"
             self._progress(state=state, message=state, finished_at=now(), category=None)
@@ -329,7 +335,7 @@ class ExampleIndex:
             if self._cancel.is_set():
                 return
             batch = todo[start:start + BATCH]
-            texts, flags = [], []
+            texts, qtexts, flags = [], [], []
             for rel, _ in batch:
                 p = Path(rel)
                 content = ""
@@ -340,28 +346,75 @@ class ExampleIndex:
                         content = ""
                 folder = os.path.join(root.name, str(p.parent)) if str(p.parent) != "." else root.name
                 texts.append(doc_text(folder, p.name, kind_of(p), content))
+                qtexts.append(inbox_text(p.name, kind_of(p), content))
                 flags.append(1 if content else 0)
             vecs = self.embedder.encode(texts)
+            qvecs = self.embedder.encode(qtexts, query=True)
             self.store.executemany(
-                "INSERT OR REPLACE INTO examples (category_key, relpath, mtime, origin, has_content, model, vector) "
-                "VALUES (?, ?, ?, 'scan', ?, ?, ?)",
-                [(key, rel, mtime, f, model, v.astype(np.float16).tobytes())
-                 for (rel, mtime), f, v in zip(batch, flags, vecs)])
+                "INSERT OR REPLACE INTO examples (category_key, relpath, mtime, origin, has_content, model, vector, "
+                "qvector) VALUES (?, ?, ?, 'scan', ?, ?, ?, ?)",
+                [(key, rel, mtime, f, model, v.astype(np.float16).tobytes(), q.astype(np.float16).tobytes())
+                 for (rel, mtime), f, v, q in zip(batch, flags, vecs, qvecs)])
             self._progress(done=min(start + BATCH, len(todo)), added=self.status["added"] + len(batch))
             time.sleep(PAUSE)
 
+    def fill_query_vectors(self, categories: list[Category]) -> None:
+        """Inbox-style vectors for all categories (synchronous; see _fill_query_vectors)."""
+        for c in categories:
+            if c.usable and c.path is not None:
+                self._fill_query_vectors(c)
+
+    def _fill_query_vectors(self, c: Category) -> None:
+        """Inbox-style vectors for examples indexed before they existed. Name-only examples are done
+        from the stored path (no disk access); examples whose text was read need it once more."""
+        key, root = category_key(c), c.path
+        rows = self.store.query("SELECT id, relpath, has_content FROM examples WHERE category_key = ? "
+                                "AND origin = 'scan' AND model = ? AND qvector IS NULL",
+                                (key, self.embedder.model_name))
+        if not rows:
+            return
+        self._progress(message=f"inbox-style vectors: {c.name}", done=0, total=len(rows))
+        for start in range(0, len(rows), BATCH):
+            if self._cancel.is_set():
+                return
+            batch = rows[start:start + BATCH]
+            texts = []
+            for r in batch:
+                p = Path(r["relpath"])
+                content = ""
+                if r["has_content"]:
+                    try:
+                        content = extract(root / p, SNIPPET_CHARS).text
+                    except OSError:
+                        content = ""
+                texts.append(inbox_text(p.name, kind_of(p), content))
+            self.set_query_vectors([(r["id"], q) for r, q in zip(batch, self.embedder.encode(texts, query=True))])
+            self._progress(done=min(start + BATCH, len(rows)))
+            time.sleep(PAUSE)
+
+    def set_query_vectors(self, items: list[tuple[int, np.ndarray]]) -> None:
+        self.store.executemany("UPDATE examples SET qvector = ? WHERE id = ?",
+                               [(q.astype(np.float16).tobytes(), i) for i, q in items])
+
+    def training_rows(self, allowed: set[str]) -> list[dict]:
+        """Examples with an inbox-style vector, for training: id, category_key, origin, qvector."""
+        return [r for r in self.store.query(
+            "SELECT id, category_key, relpath, origin, qvector FROM examples WHERE model = ? AND qvector IS NOT NULL",
+            (self.embedder.model_name,)) if r["category_key"] in allowed]
+
     # --- learning from applied files ----------------------------------------------------
 
-    def add(self, items: list[tuple[str, str, str]]) -> None:
-        """Add learned examples: [(category_key, relpath, text)] (origin 'applied')."""
+    def add(self, items: list[tuple[str, str, str, str]]) -> None:
+        """Add learned examples: [(category_key, relpath, text, inbox-style text)] (origin 'applied')."""
         if not items:
             return
-        vecs = self.embedder.encode([t for _, _, t in items])
+        vecs = self.embedder.encode([it[2] for it in items])
+        qvecs = self.embedder.encode([it[3] for it in items], query=True)
         self.store.executemany(
-            "INSERT OR REPLACE INTO examples (category_key, relpath, mtime, origin, has_content, model, vector) "
-            "VALUES (?, ?, ?, 'applied', 0, ?, ?)",
-            [(k, rel, time.time(), self.embedder.model_name, v.astype(np.float16).tobytes())
-             for (k, rel, _), v in zip(items, vecs)])
+            "INSERT OR REPLACE INTO examples (category_key, relpath, mtime, origin, has_content, model, vector, qvector) "
+            "VALUES (?, ?, ?, 'applied', 0, ?, ?, ?)",
+            [(it[0], it[1], time.time(), self.embedder.model_name, v.astype(np.float16).tobytes(),
+              q.astype(np.float16).tobytes()) for it, v, q in zip(items, vecs, qvecs)])
         self.load()
 
     def remove(self, items: list[tuple[str, str]]) -> None:

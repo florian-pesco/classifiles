@@ -98,6 +98,19 @@ CREATE TABLE IF NOT EXISTS catalog (
 );
 CREATE INDEX IF NOT EXISTS catalog_size ON catalog(size);
 -- Already-sorted files used as examples by the example-based classifier (see examples.py).
+-- Trained classifier (trained.py): the latest model per embedding model.
+CREATE TABLE IF NOT EXISTS classifiers (
+    id INTEGER PRIMARY KEY,
+    model TEXT NOT NULL,                  -- embedding model the vectors come from
+    created_at TEXT NOT NULL,
+    keys TEXT NOT NULL,                   -- JSON: category keys, one row of coef each
+    dims INTEGER NOT NULL,
+    coef BLOB NOT NULL,                   -- float32 (categories × dims)
+    intercept BLOB NOT NULL,              -- float32 (categories)
+    c REAL NOT NULL,
+    temperature REAL NOT NULL,
+    n_train TEXT NOT NULL                 -- JSON: examples per category key
+);
 CREATE TABLE IF NOT EXISTS examples (
     id INTEGER PRIMARY KEY,
     category_key TEXT NOT NULL,           -- category folder path, or '__delete__'
@@ -107,12 +120,14 @@ CREATE TABLE IF NOT EXISTS examples (
     has_content INTEGER NOT NULL DEFAULT 0,
     model TEXT NOT NULL,
     vector BLOB NOT NULL,                 -- float16, L2-normalised
+    qvector BLOB,                         -- the same file embedded like an inbox file (no folder), for training
     UNIQUE (category_key, relpath, origin)
 );
 """
 
 # Columns added after the first release: (table, column, definition). Applied to older databases.
 MIGRATIONS = [
+    ("examples", "qvector", "BLOB"),
     ("scans", "max_files", "INTEGER"),
     ("scans", "only_new", "INTEGER NOT NULL DEFAULT 0"),
     ("scans", "inbox_total", "INTEGER NOT NULL DEFAULT 0"),
