@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import threading
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
@@ -12,7 +11,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from classifiles import ClassifilesService, Settings
+from classifiles import ClassifilesService, Settings, background
 from classifiles.extract.base import KINDS
 
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
@@ -242,13 +241,8 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
             raise HTTPException(400, "No inbox given or configured")
         scan_id = guard(svc.start_scan, inbox, req.max_files, req.only_new)
 
-        def run():
-            try:
-                svc.run_scan(scan_id)
-            except Exception:
-                pass  # recorded on the scan row as status=failed
-
-        threading.Thread(target=run, daemon=True).start()
+        # failures are recorded on the scan row (status=failed); scans keep normal priority
+        background.run_in_background(svc.run_scan, scan_id, name="classifiles-scan", low_priority=False)
         return svc.get_scan(scan_id)
 
     @app.post("/api/scans/second-opinion/cancel")

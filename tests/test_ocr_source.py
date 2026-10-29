@@ -88,7 +88,7 @@ def test_no_lookup_for_files_outside_windows_drives():
 
 def test_scan_adds_source_to_evidence_and_query(service, tree, monkeypatch):
     target = tree["inbox"] / "invoice_march.txt"
-    monkeypatch.setattr("classifiles.service.download_sources", lambda files: {target: "lms.example.edu"})
+    monkeypatch.setattr("classifiles.service.scanning.download_sources", lambda files: {target: "lms.example.edu"})
     _, rows = service.scan(tree["inbox"])
     r = next(r for r in rows if r["name"] == "invoice_march.txt")
     assert r["evidence"]["meta"]["source"] == "lms.example.edu"
@@ -100,7 +100,7 @@ def test_scan_adds_source_to_evidence_and_query(service, tree, monkeypatch):
 
 def test_source_lookup_can_be_switched_off(service, tree, monkeypatch):
     service.settings.use_download_source = False
-    monkeypatch.setattr("classifiles.service.download_sources", lambda files: pytest.fail("called"))
+    monkeypatch.setattr("classifiles.service.scanning.download_sources", lambda files: pytest.fail("called"))
     service.scan(tree["inbox"])
 
 

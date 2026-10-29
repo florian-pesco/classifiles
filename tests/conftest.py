@@ -98,3 +98,22 @@ def ex_service(service):
     service.settings.embedding_model = "fake"
     service.reset_decider()  # the base fixture pre-sets the keyword decider
     return service
+
+
+@pytest.fixture
+def sync_background(monkeypatch):
+    """Run background work (learning, index builds) right away, so tests can check its result."""
+    from classifiles import background
+
+    class Done:
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
+    def run_now(fn, *args, name="", low_priority=True):
+        fn(*args)
+        return Done()
+
+    monkeypatch.setattr(background, "run_in_background", run_now)

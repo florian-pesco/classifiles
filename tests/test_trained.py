@@ -54,9 +54,7 @@ def test_missing_inbox_style_vectors_are_filled_on_update(spy_service, sorted_tr
     assert after == before
 
 
-def test_applied_files_get_inbox_style_vectors(ex_service, sorted_tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+def test_applied_files_get_inbox_style_vectors(ex_service, sorted_tree, monkeypatch, sync_background):
     ex_service.example_index().build(ex_service.categories(refresh=True))
     scan_id, rows = ex_service.scan(sorted_tree["inbox"])
     r = next(r for r in rows if r["name"] == "invoice_march.txt")
@@ -214,7 +212,7 @@ def test_weight_zero_means_similar_files_only(trained_service):
 def test_first_use_trains_once_in_the_background(trained_service):
     trained_service.reset_decider()
     trained_service.decider()
-    trained_service._train_timer.join(30)
+    trained_service._retrainer.join(30)
     assert trained_service.trained_model() is not None
     assert trained_service.decider().trained is not None  # the decider was rebuilt with the model
 
@@ -227,11 +225,11 @@ def test_apply_and_undo_retrain(trained_service, monkeypatch):
     r = next(r for r in rows if r["name"] == "invoice_march.txt")
     trained_service.review(r["id"], "accept", "Finance", subpath="")
     trained_service.apply(scan_id)
-    trained_service._train_timer.join(30)
+    trained_service._retrainer.join(30)
     key = next(k for k in before if k.endswith("Finance"))
     assert trained_service.trained_model().n_train[key] == before[key] + 1  # the applied file was learned
     trained_service.undo()
-    trained_service._train_timer.join(30)
+    trained_service._retrainer.join(30)
     assert trained_service.trained_model().n_train[key] == before[key]
 
 
@@ -266,7 +264,7 @@ def test_api_weight_retrain_and_quality(trained_service, tmp_path):
     assert client.patch("/api/settings", json={"trained_weight": 1.5}).status_code == 400
     assert client.patch("/api/settings", json={"trained_weight": 0.25}).json()["trained_weight"] == 0.25
     client.post("/api/index/retrain")
-    trained_service._train_timer.join(30)
+    trained_service._retrainer.join(30)
     assert client.get("/api/index").json()["trained"]["trained"]
     q = client.get("/api/quality?rerun=true").json()
     assert q["decisions"] == 0 and "mix" not in q  # no decisions yet: nothing to compare

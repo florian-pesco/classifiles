@@ -72,13 +72,11 @@ class Labeller:
         import torch
         from transformers import AutoTokenizer, SiglipModel
 
+        from .hf import load_pretrained
+
         torch.set_num_threads(self.threads)
-        try:
-            tok = AutoTokenizer.from_pretrained(self.model, local_files_only=True)
-        except OSError:
-            log.info("Downloading the tokenizer of %s (one time)", self.model)
-            tok = AutoTokenizer.from_pretrained(self.model)
-        m = SiglipModel.from_pretrained(self.model, dtype=torch.float32, local_files_only=True).eval()
+        tok = load_pretrained(AutoTokenizer.from_pretrained, self.model, "tokenizer")
+        m = load_pretrained(SiglipModel.from_pretrained, self.model, "picture model", dtype=torch.float32).eval()
         with torch.inference_mode():
             t = tok(prompts, padding="max_length", max_length=64, return_tensors="pt")
             out = m.get_text_features(**t)

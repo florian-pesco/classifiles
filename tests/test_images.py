@@ -67,9 +67,7 @@ def test_switch_off(img_service, tree):
     assert "looks like" not in next(r for r in rows if r["name"] == "IMG_9999.jpg")["reason"]
 
 
-def test_applied_pictures_are_learned_and_forgotten(img_service, tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+def test_applied_pictures_are_learned_and_forgotten(img_service, tree, monkeypatch, sync_background):
     img_service.example_index().build(img_service.categories(refresh=True))
     img_service.image_index().build(img_service.categories(refresh=True))
     picture(tree["inbox"] / "IMG_7777.jpg", (200, 30, 30))

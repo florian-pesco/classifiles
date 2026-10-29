@@ -50,9 +50,7 @@ def test_normalize_and_split(tmp_path):
     assert split_existing(tmp_path, "A/New/Deeper") == ("A", ["New", "Deeper"])
 
 
-def test_scan_suggests_subfolder_and_apply_uses_it(ex_service, sorted_tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+def test_scan_suggests_subfolder_and_apply_uses_it(ex_service, sorted_tree, monkeypatch, sync_background):
     ex_service.example_index().build(ex_service.categories(refresh=True))
     (sorted_tree["inbox"] / "invoice_april.txt").write_text("invoice april")
     scan_id, rows = ex_service.scan(sorted_tree["inbox"])

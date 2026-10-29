@@ -61,12 +61,10 @@ def test_disabled_category_never_proposed(ex_service, sorted_tree):
     assert all(r["target"] != "Finance" for r in rows)
 
 
-def test_learns_from_apply_and_forgets_on_undo(ex_service, sorted_tree, monkeypatch):
+def test_learns_from_apply_and_forgets_on_undo(ex_service, sorted_tree, monkeypatch, sync_background):
     idx = ex_service.example_index()
     idx.build(ex_service.categories(refresh=True))
     # run the background learning synchronously
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
     scan_id, rows = ex_service.scan(sorted_tree["inbox"])
     pid = next(r["id"] for r in rows if r["name"] == "bundle.zip")
     ex_service.review(pid, "accept", "Delete")
@@ -172,7 +170,7 @@ def test_quality_api(ex_service, sorted_tree, tmp_path):
     assert client.get("/api/categories").json()["unreachable_roots"] == []
 
 
-def test_backfill_past_decisions_and_always_learn(ex_service, sorted_tree, monkeypatch):
+def test_backfill_past_decisions_and_always_learn(ex_service, sorted_tree, monkeypatch, sync_background):
     # decisions made with another model (index empty): nothing is learned at apply time
     ex_service.settings.backend = "keyword"
     ex_service.reset_decider()
@@ -193,8 +191,6 @@ def test_backfill_past_decisions_and_always_learn(ex_service, sorted_tree, monke
     assert ex_service.learn_past_decisions()["learned"] == 0  # idempotent
 
     # once an index exists, applies are learned even with another model selected
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
     scan_id, rows = ex_service.scan(sorted_tree["inbox"])
     notes = next(r for r in rows if r["name"] == "meeting_notes.docx")
     ex_service.review(notes["id"], "accept", "Work")
@@ -202,9 +198,7 @@ def test_backfill_past_decisions_and_always_learn(ex_service, sorted_tree, monke
     assert ex_service.unlearned_decisions() == []
 
 
-def test_decision_eval_hides_learned_deletions(ex_service, sorted_tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+def test_decision_eval_hides_learned_deletions(ex_service, sorted_tree, monkeypatch, sync_background):
     ex_service.example_index().build(ex_service.categories(refresh=True))
     ex_service.set_categories(ex_service.settings.roots, ex_service.settings.categories,
                               {"enabled": True, "suggest": True})

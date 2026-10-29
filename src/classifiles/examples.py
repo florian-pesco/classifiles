@@ -26,6 +26,7 @@ from pathlib import Path
 
 import numpy as np
 
+from . import background
 from .embedder import Embedder
 from .extract import Evidence, extract, kind_of
 from .store import Store, now
@@ -241,16 +242,11 @@ class ExampleIndex:
         self._cancel.clear()
 
         def run():
-            try:
-                os.nice(10)  # Linux: lowers this thread only
-            except OSError:
-                pass
             self.build(categories)
             if on_done:
                 on_done()
 
-        self._thread = threading.Thread(target=run, daemon=True, name="classifiles-index")
-        self._thread.start()
+        self._thread = background.run_in_background(run, name="classifiles-index")
 
     def cancel(self) -> None:
         self._cancel.set()

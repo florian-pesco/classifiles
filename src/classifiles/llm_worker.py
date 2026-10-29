@@ -30,22 +30,20 @@ SYSTEM = ("You sort files into folders. You are given a file and up to three can
           "the file belongs in, and nothing else.")
 
 
+
 def _load(model_name: str, gpu_fraction: float, threads: int):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from classifiles.hf import load_pretrained
 
     torch.set_num_threads(threads)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cuda":
         torch.cuda.set_per_process_memory_fraction(gpu_fraction)
     kwargs = {"dtype": torch.bfloat16} if device == "cuda" else {}
-    try:  # offline first; download only if the model isn't cached yet
-        tok = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
-        model = AutoModelForCausalLM.from_pretrained(model_name, local_files_only=True, **kwargs)
-    except OSError:
-        tok = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
-    os.environ["HF_HUB_OFFLINE"] = "1"
+    tok = load_pretrained(AutoTokenizer.from_pretrained, model_name, "tokenizer")
+    model = load_pretrained(AutoModelForCausalLM.from_pretrained, model_name, "language model", **kwargs)
     model.to(device).eval()  # type: ignore[arg-type]  # transformers' stubs type .to() too narrowly
     return tok, model, device
 

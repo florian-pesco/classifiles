@@ -15,7 +15,6 @@ Everything runs locally; the model is downloaded once, then loaded offline.
 from __future__ import annotations
 
 import logging
-import os
 import threading
 import time
 from pathlib import Path
@@ -25,6 +24,7 @@ import numpy as np
 
 from .examples import BATCH, PAUSE, Candidates, category_key, nearest, sample_folder, vote, with_extra
 from .extract import kind_of
+from .hf import load_pretrained
 from .store import Store, now
 from .taxonomy import Category
 
@@ -66,14 +66,8 @@ class ImageEmbedder:
         if self._device == "cuda":
             torch.cuda.set_per_process_memory_fraction(self.gpu_memory_fraction)
         dtype = torch.float16 if self._device == "cuda" else torch.float32
-        try:
-            proc = AutoImageProcessor.from_pretrained(self.model_name, local_files_only=True)
-            model = SiglipVisionModel.from_pretrained(self.model_name, dtype=dtype, local_files_only=True)
-        except OSError:
-            log.info("Downloading image model %s (one time)", self.model_name)
-            proc = AutoImageProcessor.from_pretrained(self.model_name)
-            model = SiglipVisionModel.from_pretrained(self.model_name, dtype=dtype)
-        os.environ["HF_HUB_OFFLINE"] = "1"
+        proc = load_pretrained(AutoImageProcessor.from_pretrained, self.model_name, "image model")
+        model = load_pretrained(SiglipVisionModel.from_pretrained, self.model_name, "image model", dtype=dtype)
         self._proc, self._model = proc, model.to(self._device).eval()
 
     @staticmethod

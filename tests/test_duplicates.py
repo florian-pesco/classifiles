@@ -116,8 +116,6 @@ def test_switches(service, tree):
 
 
 def test_apply_trashes_duplicate_without_learning_and_keeps_catalog_current(service, tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
     learned = []
     monkeypatch.setattr(service, "_learn", lambda items: learned.extend(items))
     write(tree["inbox"] / "a.txt", b"same", 100)

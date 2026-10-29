@@ -67,3 +67,8 @@ files = ["src"]
 ignore_missing_imports = true
 check_untyped_defs = false
 warn_unused_ignores = true
+
+[[tool.mypy.overrides]]
+# The service is split into mixins that call each other's methods; mypy can't see across them.
+module = "classifiles.service.*"
+disable_error_code = ["attr-defined"]
