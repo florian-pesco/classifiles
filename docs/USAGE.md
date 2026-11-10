@@ -97,7 +97,8 @@ switch at the bottom.
    The original name is kept unless you click the suggestion; **edit…** lets you type any name,
    **keep original** goes back. The suggestion follows when you change the category or folder. In the
    action bar (with files selected): **Use suggested names** / **Keep original names**. Apply shows "renamed
-   to …"; undo restores the original name. Photos, videos, archives and code are never renamed.
+   to …"; undo restores the original name. Photos and videos get their own kind of name (see
+   *File names* in §6); archives, installers and code only lose copy markers like "(1)".
 5. **Review together (batches).** Above the list, classifiles suggests groups of files that are
    probably decided the same way:
    - **Same name pattern**: names that differ only in numbers, dates or IDs, e.g. `Scan_‹date›_‹n›.pdf`;
@@ -217,8 +218,7 @@ rules:
   - {name: "Rechnung|Invoice", folder: Personal}
 threshold: 0.7
 max_files: null
-backend: laya
-laya_model: convaiinnovations/laya      # or: ml (multilingual)
+backend: examples                        # examples (learn from my folders) | laya | keyword
 samples_per_folder: 3
 max_text_chars: 1500
 db_path: /home/<you>/.local/share/classifiles/classifiles.db
