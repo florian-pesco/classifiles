@@ -3,6 +3,7 @@ import { api, type Category, type Rule } from '../api'
 import { CategorySelect } from '../components/CategorySelect'
 import { PageHead } from '../components/PageHead'
 import { Icon } from '../components/Icon'
+import { useMessages } from '../messages'
 
 /** Editable form of a rule; converted to/from the config format on load/save. */
 interface Draft {
@@ -38,11 +39,10 @@ function toRule(d: Draft): Rule {
 
 const hasCondition = (d: Draft) => Boolean(d.ext.trim() || d.kinds.length || d.name.trim() || d.glob.trim())
 
-export function RulesPage({ categories, notify, fail }: {
+export function RulesPage({ categories }: {
   categories: Category[]
-  notify: (m: string) => void
-  fail: (e: unknown) => void
 }) {
+  const { notify, fail } = useMessages()
   const [drafts, setDrafts] = useState<Draft[]>([])
   const [kinds, setKinds] = useState<string[]>([])
   const [dirty, setDirty] = useState(false)

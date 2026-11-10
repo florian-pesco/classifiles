@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useState } from 'react'
 import { api, shortDate, type IndexStatus } from '../api'
+import { useMessages } from '../messages'
 
 /** Status and controls of the example index (what "Learn from my folders" uses). */
-export function IndexCard({ active, notify, fail }: {
+export function IndexCard({ active }: {
   active: boolean  // is the examples backend selected?
-  notify: (m: string) => void
-  fail: (e: unknown) => void
 }) {
+  const { notify, fail } = useMessages()
   const [st, setSt] = useState<IndexStatus | null>(null)
   const load = useCallback(() => api.index().then(setSt).catch(fail), [fail])
   useEffect(() => { load() }, [load])

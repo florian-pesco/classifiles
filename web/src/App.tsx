@@ -1,6 +1,7 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { api, type CategoriesPayload, type Settings } from './api'
 import { Icon, type IconName } from './components/Icon'
+import { MessagesContext } from './messages'
 import { CategoriesPage } from './pages/Categories'
 import { HistoryPage } from './pages/History'
 import { ReviewPage } from './pages/Review'
@@ -47,6 +48,7 @@ export default function App() {
   const setPage = (p: Page) => { setPageState(p); window.location.hash = p }
   const fail = useCallback((e: unknown) => setError(e instanceof Error ? e.message : String(e)), [])
   const notify = useCallback((m: string) => { setError(null); setNotice(m) }, [])
+  const messages = useMemo(() => ({ notify, fail }), [notify, fail])
 
   // Follow the address bar (browser back/forward, links to #page).
   useEffect(() => {
@@ -72,90 +74,90 @@ export default function App() {
   const unreachable = (cats?.unreachable_roots?.length ?? 0) > 0
 
   return (
-    <div className="app">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark"><Icon name="folder" size={19} /></div>
-          <div>
-            <div className="brand-name">Classifiles</div>
-            <div className="brand-sub">sorts your inbox, locally</div>
-          </div>
-        </div>
-        <nav className="nav" aria-label="Pages">
-          {PAGES.map(p => (
-            <button key={p.key} className={p.key === page ? 'active' : ''} onClick={() => setPage(p.key)}
-                    aria-current={p.key === page ? 'page' : undefined} title={p.label}>
-              <Icon name={p.icon} /><span>{p.label}</span>
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-foot">
-          {cats && (
-            <div className="status-line" title={unreachable ? cats.unreachable_roots.join(', ') : 'All category folders are reachable'}>
-              <span className={`dot${unreachable ? ' bad' : ''}`} />
-              {unreachable ? 'Drive not reachable' : `${cats.categories.filter(c => c.usable && c.source !== 'delete').length} categories ready`}
+    <MessagesContext.Provider value={messages}>
+      <div className="app">
+        <aside className="sidebar">
+          <div className="brand">
+            <div className="brand-mark"><Icon name="folder" size={19} /></div>
+            <div>
+              <div className="brand-name">Classifiles</div>
+              <div className="brand-sub">sorts your inbox, locally</div>
             </div>
-          )}
-          <div className="theme-switch" role="group" aria-label="Colour theme">
-            {(['light', 'auto', 'dark'] as Theme[]).map(t => (
-              <button key={t} className={theme === t ? 'active' : ''} onClick={() => setTheme(t)}
-                      title={t === 'auto' ? 'Follow the system' : t === 'light' ? 'Light' : 'Dark'} aria-pressed={theme === t}>
-                <Icon name={t === 'auto' ? 'auto' : t === 'light' ? 'sun' : 'moon'} size={15} />
+          </div>
+          <nav className="nav" aria-label="Pages">
+            {PAGES.map(p => (
+              <button key={p.key} className={p.key === page ? 'active' : ''} onClick={() => setPage(p.key)}
+                      aria-current={p.key === page ? 'page' : undefined} title={p.label}>
+                <Icon name={p.icon} /><span>{p.label}</span>
               </button>
             ))}
+          </nav>
+          <div className="sidebar-foot">
+            {cats && (
+              <div className="status-line" title={unreachable ? cats.unreachable_roots.join(', ') : 'All category folders are reachable'}>
+                <span className={`dot${unreachable ? ' bad' : ''}`} />
+                {unreachable ? 'Drive not reachable' : `${cats.categories.filter(c => c.usable && c.source !== 'delete').length} categories ready`}
+              </div>
+            )}
+            <div className="theme-switch" role="group" aria-label="Colour theme">
+              {(['light', 'auto', 'dark'] as Theme[]).map(t => (
+                <button key={t} className={theme === t ? 'active' : ''} onClick={() => setTheme(t)}
+                        title={t === 'auto' ? 'Follow the system' : t === 'light' ? 'Light' : 'Dark'} aria-pressed={theme === t}>
+                  <Icon name={t === 'auto' ? 'auto' : t === 'light' ? 'sun' : 'moon'} size={15} />
+                </button>
+              ))}
+            </div>
+          </div>
+        </aside>
+
+        <div className="main">
+          <div className="notices">
+            {error && (
+              <div className="banner error" onClick={() => setError(null)} role="alert">
+                <Icon name="alert" /><span className="grow">{error}</span><Icon name="x" size={15} />
+              </div>
+            )}
+            {notice && (
+              <div className="banner ok" onClick={() => setNotice(null)} role="status">
+                <Icon name="check" /><span className="grow">{notice}</span>
+              </div>
+            )}
+          </div>
+          <div className="main-inner">
+            {unreachable && (
+              <div className="banner error" role="alert" style={{ marginBottom: 18, cursor: 'default' }}>
+                <Icon name="alert" />
+                <span className="grow">
+                  Category folder not reachable: <span className="mono">{cats!.unreachable_roots.join(', ')}</span>.
+                  Is the drive connected? Scans and index updates are paused until it is back.{' '}
+                  <button className="linkish" onClick={() => api.categories(true).then(setCats).catch(fail)}>Check again</button>
+                </span>
+              </div>
+            )}
+            {needsSetup && page === 'review' && (
+              <div className="banner info" style={{ marginBottom: 18 }}>
+                No categories yet. <button className="linkish" onClick={() => setPage('categories')}>Set up categories</button> first.
+              </div>
+            )}
+            {!settings || !cats ? <p className="empty">Loading…</p> : (
+              <main>
+                {page === 'review' && (
+                  <ReviewPage settings={settings} categories={cats.categories} scanId={scanId} setScanId={setScanId} />
+                )}
+                {page === 'categories' && <CategoriesPage data={cats} examplesActive={settings.backend === 'examples'} onSaved={setCats} />}
+                {page === 'rules' && <RulesPage categories={cats.categories} />}
+                {page === 'history' && (
+                  <HistoryPage openScan={id => { setScanId(id); setPage('review') }} />
+                )}
+                {page === 'settings' && (
+                  <SettingsPage settings={settings}
+                                onSaved={s => { setSettings(s); api.categories().then(setCats).catch(fail) }} />
+                )}
+              </main>
+            )}
           </div>
         </div>
-      </aside>
-
-      <div className="main">
-        <div className="notices">
-          {error && (
-            <div className="banner error" onClick={() => setError(null)} role="alert">
-              <Icon name="alert" /><span className="grow">{error}</span><Icon name="x" size={15} />
-            </div>
-          )}
-          {notice && (
-            <div className="banner ok" onClick={() => setNotice(null)} role="status">
-              <Icon name="check" /><span className="grow">{notice}</span>
-            </div>
-          )}
-        </div>
-        <div className="main-inner">
-          {unreachable && (
-            <div className="banner error" role="alert" style={{ marginBottom: 18, cursor: 'default' }}>
-              <Icon name="alert" />
-              <span className="grow">
-                Category folder not reachable: <span className="mono">{cats!.unreachable_roots.join(', ')}</span>.
-                Is the drive connected? Scans and index updates are paused until it is back.{' '}
-                <button className="linkish" onClick={() => api.categories(true).then(setCats).catch(fail)}>Check again</button>
-              </span>
-            </div>
-          )}
-          {needsSetup && page === 'review' && (
-            <div className="banner info" style={{ marginBottom: 18 }}>
-              No categories yet. <button className="linkish" onClick={() => setPage('categories')}>Set up categories</button> first.
-            </div>
-          )}
-          {!settings || !cats ? <p className="empty">Loading…</p> : (
-            <main>
-              {page === 'review' && (
-                <ReviewPage settings={settings} categories={cats.categories} scanId={scanId} setScanId={setScanId}
-                            notify={notify} fail={fail} />
-              )}
-              {page === 'categories' && <CategoriesPage data={cats} examplesActive={settings.backend === 'examples'} onSaved={setCats}
-                                                        notify={notify} fail={fail} />}
-              {page === 'rules' && <RulesPage categories={cats.categories} notify={notify} fail={fail} />}
-              {page === 'history' && (
-                <HistoryPage openScan={id => { setScanId(id); setPage('review') }} notify={notify} fail={fail} />
-              )}
-              {page === 'settings' && (
-                <SettingsPage settings={settings} notify={notify} fail={fail}
-                              onSaved={s => { setSettings(s); api.categories().then(setCats).catch(fail) }} />
-              )}
-            </main>
-          )}
-        </div>
       </div>
-    </div>
+    </MessagesContext.Provider>
   )
 }

@@ -3,6 +3,7 @@ import { api, type Settings } from '../api'
 import { PathInput } from '../components/FolderPicker'
 import { PageHead } from '../components/PageHead'
 import { Icon } from '../components/Icon'
+import { useMessages } from '../messages'
 
 const MODELS = [
   { value: 'examples:', label: 'Learn from my folders (recommended; build the index on the Categories page)' },
@@ -11,12 +12,11 @@ const MODELS = [
   { value: 'keyword:', label: 'Keyword matching (no model; for testing)' },
 ]
 
-export function SettingsPage({ settings, onSaved, notify, fail }: {
+export function SettingsPage({ settings, onSaved }: {
   settings: Settings
   onSaved: (s: Settings) => void
-  notify: (m: string) => void
-  fail: (e: unknown) => void
 }) {
+  const { notify, fail } = useMessages()
   const [inboxes, setInboxes] = useState(settings.inboxes.length ? settings.inboxes : [''])
   const [threshold, setThreshold] = useState(settings.threshold)
   const [maxFiles, setMaxFiles] = useState(settings.max_files ? String(settings.max_files) : '')

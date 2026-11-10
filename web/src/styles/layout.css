@@ -1,0 +1,97 @@
+/* --- app shell ------------------------------------------------------------------------ */
+.app { display: grid; grid-template-columns: 236px minmax(0, 1fr); min-height: 100vh; }
+.sidebar {
+  position: sticky; top: 0; height: 100vh; display: flex; flex-direction: column; gap: 22px;
+  padding: 22px 14px 18px; background: var(--panel); border-right: 1px solid var(--border);
+}
+.brand { display: flex; align-items: center; gap: 11px; padding: 2px 8px; }
+.brand-mark {
+  width: 34px; height: 34px; border-radius: 10px; display: grid; place-items: center; color: var(--accent-text);
+  background: linear-gradient(140deg, var(--accent), color-mix(in srgb, var(--accent) 55%, #1d3f5a));
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / .18);
+}
+.brand-name { font-weight: 760; font-size: 17px; letter-spacing: -.02em; }
+.brand-sub { font-size: 12px; color: var(--muted); }
+.nav { display: flex; flex-direction: column; gap: 3px; }
+.nav button {
+  justify-content: flex-start; gap: 11px; border: none; background: none; padding: 9px 11px; border-radius: 10px;
+  color: var(--text-2); font-weight: 520; width: 100%;
+}
+.nav button:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+.nav button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.nav button.active .ico { color: var(--accent); }
+.sidebar-foot { margin-top: auto; display: flex; flex-direction: column; gap: 10px; padding: 0 6px; }
+.theme-switch { display: flex; gap: 2px; padding: 3px; border-radius: 11px; background: var(--hover); width: fit-content; }
+.theme-switch button { border: none; background: none; width: 34px; height: 28px; padding: 0; border-radius: 8px; color: var(--muted); }
+.theme-switch button.active { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.status-line { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--muted); }
+.dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
+.dot.bad { background: var(--bad); }
+
+.main { min-width: 0; }
+.main-inner { max-width: 1120px; margin: 0 auto; padding: 34px 40px 150px; }
+.notices { position: fixed; top: 18px; right: 22px; z-index: 30; display: flex; flex-direction: column; gap: 8px; width: min(420px, calc(100vw - 32px)); }
+.page { display: flex; flex-direction: column; gap: 18px; }
+.page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin-bottom: 4px; }
+.page-head .lead { margin: 6px 0 0; color: var(--text-2); max-width: 680px; }
+.page-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; min-width: 0; max-width: 100%; }
+.page-actions select { max-width: 100%; }
+
+/* surfaces */
+.card {
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 20px 22px;
+  box-shadow: var(--shadow);
+}
+.card > h3 + p, .card > h3 + .muted { margin-top: 6px; }
+.card.explain p { margin: 0 0 8px; line-height: 1.6; color: var(--text-2); }
+.card.explain ul { margin: 6px 0 0; padding-left: 18px; line-height: 1.7; color: var(--text-2); }
+.card.explain h2 { display: none; } /* the page header carries the title */
+.section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.empty { color: var(--muted); text-align: center; padding: 64px 20px; border: 1px dashed var(--border-strong); border-radius: var(--radius); }
+.empty .ico { margin: 0 auto 12px; color: var(--muted); }
+
+/* banners (notices top right, inline banners in pages) */
+.banner {
+  display: flex; align-items: flex-start; gap: 10px; padding: 11px 14px; border-radius: 12px; font-size: 14px;
+  border: 1px solid transparent; cursor: pointer;
+}
+.banner.error { background: var(--bad-bg); color: var(--bad); border-color: color-mix(in srgb, var(--bad) 25%, transparent); }
+.banner.ok { background: var(--surface); color: var(--text); border-color: var(--border); box-shadow: var(--shadow-lift); }
+.banner.ok .ico { color: var(--ok); }
+.banner.info { background: var(--info-bg); cursor: default; border-color: color-mix(in srgb, var(--info) 20%, transparent); }
+.notices .banner.error { background: var(--surface); box-shadow: var(--shadow-lift); }
+
+/* chips and badges */
+.chip {
+  border-radius: 999px; padding: 4px 12px; font-size: 13px; background: var(--surface); border: 1px solid var(--border);
+}
+.chip.active { background: var(--text); color: var(--bg); border-color: var(--text); }
+.count { opacity: .6; margin-left: 2px; font-variant-numeric: tabular-nums; }
+.badge {
+  display: inline-flex; align-items: center; gap: 5px; font-size: 12px; font-weight: 560; padding: 3px 10px;
+  border-radius: 999px; white-space: nowrap; background: var(--hover); color: var(--text-2); line-height: 1.4;
+}
+.badge::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: .9; }
+.badge.suggested { background: var(--ok-bg); color: var(--ok); }
+.badge.needs_review { background: var(--warn-bg); color: var(--warn); }
+.badge.accepted { background: var(--accent-bg); color: var(--accent); }
+.badge.rejected { background: var(--hover); color: var(--muted); }
+.badge.moved { background: var(--hover); color: var(--text-2); }
+.badge.act-move { background: var(--accent-bg); color: var(--accent); }
+.badge.act-copy { background: var(--ok-bg); color: var(--ok); }
+.badge.act-delete, .badge.act-none { background: var(--bad-bg); color: var(--bad); }
+.badge.new { background: var(--warn-bg); color: var(--warn); }
+.badge.learned { background: var(--info-bg); color: var(--info); }
+.badge.so-agree { background: var(--ok-bg); color: var(--ok); }
+.badge.so-differ { background: var(--info-bg); color: var(--info); }
+.badge.dup { background: var(--warn-bg); color: var(--warn); }
+.badge.plain::before { display: none; }
+
+/* progress */
+.progress {
+  position: relative; height: 26px; margin-top: 14px; border-radius: 9px; background: var(--surface-2);
+  border: 1px solid var(--border); overflow: hidden;
+}
+.progress div { height: 100%; background: linear-gradient(90deg, var(--accent-bg), color-mix(in srgb, var(--accent) 30%, transparent)); transition: width .3s; }
+.progress span { position: absolute; inset: 0; text-align: center; font-size: 12.5px; line-height: 24px; color: var(--text-2); }
+

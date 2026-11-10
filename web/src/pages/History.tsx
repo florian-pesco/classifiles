@@ -6,6 +6,7 @@ import { PageHead } from '../components/PageHead'
 import { QualityCard } from '../components/QualityCard'
 import { ShowMore } from '../components/ShowMore'
 import { STATUS_LABEL } from '../labels'
+import { useMessages } from '../messages'
 
 type Tab = 'scans' | 'applied' | 'trash'
 const STATUS_ORDER: Status[] = ['moved', 'accepted', 'suggested', 'needs_review', 'rejected']
@@ -21,11 +22,10 @@ function StatusBar({ scan }: { scan: Scan }) {
   )
 }
 
-export function HistoryPage({ openScan, notify, fail }: {
+export function HistoryPage({ openScan }: {
   openScan: (id: number) => void
-  notify: (m: string) => void
-  fail: (e: unknown) => void
 }) {
+  const { notify, fail } = useMessages()
   const [scans, setScans] = useState<Scan[]>([])
   const [batches, setBatches] = useState<Batch[]>([])
   const [trash, setTrash] = useState<TrashItem[]>([])
@@ -69,7 +69,7 @@ export function HistoryPage({ openScan, notify, fail }: {
         <div className="stat"><span className="stat-value">{trash.length}</span><span className="stat-label">in trash · {humanSize(trashSize)}</span></div>
       </div>
 
-      <QualityCard fail={fail} />
+      <QualityCard />
 
       <section className="card">
         <div className="section-head">
