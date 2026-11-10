@@ -93,7 +93,7 @@ def main(argv: list[str] | None = None) -> None:
     out = sys.stdout
     try:
         tok, model, device = _load(args.model, args.gpu_fraction, args.threads)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - reported to the parent process, which records it
         out.write(json.dumps({"ready": False, "error": str(e)[:500]}) + "\n")
         out.flush()
         return
@@ -115,7 +115,7 @@ def main(argv: list[str] | None = None) -> None:
                 res = {"id": req.get("id"), "probs": choose(tok, model, device, req["prompt"], req["options"])}
             else:
                 res = {"id": req.get("id"), "error": f"unknown task {req.get('task')!r}"}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - one bad request must not end the worker
             res = {"id": req.get("id") if isinstance(req, dict) else None, "error": str(e)[:500]}
         out.write(json.dumps(res) + "\n")
         out.flush()

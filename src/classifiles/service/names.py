@@ -44,7 +44,7 @@ class NamesMixin(ServiceBase):
                     label, share = self.labeller().label(vec)
                     if label:
                         hints.update(label=label, label_share=round(share, 3))
-            except Exception:
+            except Exception:  # noqa: BLE001 - a name hint must never stop a scan
                 log.exception("picture recognition for a file name failed")
         gps = (ev.meta or {}).get("gps")
         if s.name_media_place and gps:

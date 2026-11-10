@@ -52,7 +52,7 @@ def extract(path: str | Path, max_chars: int = 1500, ocr_pdf_pages: int = 0, ocr
                 ev.text, ev.meta = fn(path, max_chars, ocr_images)
             else:
                 ev.text, ev.meta = fn(path, max_chars)
-        except Exception as e:  # a broken file must never stop a scan
+        except Exception as e:  # noqa: BLE001 - a broken file must never stop a scan
             log.debug("extract failed for %s: %s", path, e)
             ev.meta["extract_error"] = str(e)[:200]
     ev.text = " ".join(ev.text.split())[:max_chars]

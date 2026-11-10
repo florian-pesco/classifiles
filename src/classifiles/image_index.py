@@ -81,7 +81,8 @@ class ImageEmbedder:
             im = src.convert("RGB")
             im.thumbnail((448, 448))
             return im
-        except Exception:
+        except Exception as e:  # noqa: BLE001 - PIL raises anything on broken pictures
+            log.debug("cannot open %s: %s", path, e)
             return None
 
     def encode_images(self, images: list) -> np.ndarray:

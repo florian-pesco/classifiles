@@ -7,10 +7,13 @@ Other containers (mkv, avi, …) only get the frame.
 
 from __future__ import annotations
 
+import logging
 import re
 import struct
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 MAX_FRAME_BYTES = 500 * 1024 * 1024  # videos above this size are not opened for a frame
 _EPOCH_1904 = datetime(1904, 1, 1, tzinfo=UTC)
@@ -120,5 +123,6 @@ def middle_frame(path: Path):
         im = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
         im.thumbnail((448, 448))
         return im
-    except Exception:
+    except Exception as e:  # noqa: BLE001 - OpenCV raises anything on broken videos
+        log.debug("no middle frame for %s: %s", path, e)
         return None

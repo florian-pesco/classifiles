@@ -27,7 +27,7 @@ def _gps(exif) -> list[float] | None:
         if not (-90 <= lat <= 90 and -180 <= lon <= 180) or (lat == 0 and lon == 0):
             return None
         return [round(lat, 5), round(lon, 5)]
-    except Exception:
+    except (ArithmeticError, AttributeError, LookupError, TypeError, ValueError):  # malformed GPS block
         return None
 
 

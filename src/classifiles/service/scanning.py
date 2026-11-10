@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -242,3 +243,31 @@ class ScanningMixin(ServiceBase):
     def latest_scan_id(self) -> int | None:
         row = self.store.one("SELECT id FROM scans ORDER BY id DESC LIMIT 1")
         return row["id"] if row else None
+
+    def prune_scans(self, older_than_days: int, dry_run: bool = False) -> dict:
+        """Remove what old scans left undecided: proposals still suggested or needing review, from
+        finished scans started more than `older_than_days` ago, and scans left without proposals.
+
+        Decisions stay (accepted, kept in inbox, applied): they feed Quality, learning and undo. The
+        removed files count as new again for "Only new". Returns the counts; dry_run only counts."""
+        if older_than_days < 0:
+            raise ValueError("older_than_days must be 0 or more")
+        cutoff = (datetime.now() - timedelta(days=older_than_days)).isoformat(timespec="seconds")
+        old_scan = "SELECT id FROM scans WHERE created_at < :cutoff AND status != 'running'"
+        undecided = ("p.status IN ('suggested', 'needs_review') "
+                     "AND NOT EXISTS (SELECT 1 FROM moves m WHERE m.proposal_id = p.id)")
+        params = {"cutoff": cutoff}
+        proposals = self.store.one(f"SELECT COUNT(*) AS n FROM proposals p WHERE p.scan_id IN ({old_scan}) "
+                                   f"AND {undecided}", params)
+        empty_after = (f"SELECT s.id FROM scans s WHERE s.id IN ({old_scan}) AND NOT EXISTS "
+                       f"(SELECT 1 FROM proposals p WHERE p.scan_id = s.id AND NOT ({undecided}))")
+        scans = self.store.one(f"SELECT COUNT(*) AS n FROM ({empty_after})", params)
+        out = {"proposals": proposals["n"] if proposals else 0, "scans": scans["n"] if scans else 0}
+        if dry_run or not (out["proposals"] or out["scans"]):
+            return out
+        self.store.execute(f"DELETE FROM proposals WHERE id IN (SELECT p.id FROM proposals p "
+                           f"WHERE p.scan_id IN ({old_scan}) AND {undecided})", params)
+        self.store.execute(f"DELETE FROM scans WHERE id IN ({old_scan}) "
+                           "AND NOT EXISTS (SELECT 1 FROM proposals p WHERE p.scan_id = scans.id)", params)
+        self.store.execute("VACUUM")  # give the space back
+        return out

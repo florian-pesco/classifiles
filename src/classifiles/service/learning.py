@@ -53,7 +53,7 @@ class LearningMixin(ServiceBase):
             self._trained = (model, m)
             self.reset_decider()
             self._trained_status = {"state": "done", "finished_at": now()}
-        except Exception as e:
+        except Exception as e:  # noqa: BLE001 - background training: recorded in the status
             log.exception("training the classifier failed")
             self._trained_status = {"state": "failed", "error": str(e)[:300]}
         finally:

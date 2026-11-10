@@ -520,7 +520,8 @@ One SQLite file. The main tables:
 | `classifiers` | trained model | embedding model, category keys, coefficients, C, temperature (§4b) |
 | `label_features` | picture label set | cached text vectors of the label prompts, logit scale and bias (§4e) |
 
-New columns are added on startup by `MIGRATIONS` in `store.py`.
+Schema changes are numbered steps in `MIGRATIONS` (`store.py`). The database records how many it
+has run (`PRAGMA user_version`), so each runs once; a database from a newer version is refused.
 
 You can inspect it directly:
 
@@ -665,6 +666,7 @@ Be aware of these before relying on it:
 - Threshold changes apply to the **next** scan. Existing proposals keep their status.
 - Rescanning the same inbox creates new proposals for the same files, unless you tick "Only new".
 - Renaming or removing a category later breaks accepted proposals that point at it; Apply reports them.
-- The database grows with every scan. There is no cleanup command yet.
+- The database grows with every scan. `classifiles prune` removes undecided proposals of old scans;
+  decisions are kept.
 - Copy + undo removes the copy only if it is unchanged; otherwise it stays and is reported.
 - Opening files, Explorer and the download source need WSL with `powershell.exe` (Windows).

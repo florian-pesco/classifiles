@@ -14,7 +14,7 @@ def load_pretrained[T](load: Callable[..., T], name: str, what: str = "model", *
     process stays offline (HF_HUB_OFFLINE), so nothing touches the network again."""
     try:
         obj = load(name, local_files_only=True, **kwargs)
-    except Exception:
+    except Exception:  # noqa: BLE001 - not in the cache: each loader raises its own error type
         log.info("Downloading %s %s (one time)", what, name)
         obj = load(name, **kwargs)
     os.environ["HF_HUB_OFFLINE"] = "1"

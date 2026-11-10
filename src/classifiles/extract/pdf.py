@@ -24,7 +24,8 @@ def extract(path: Path, max_chars: int, ocr_pages: int = 0) -> tuple[str, dict]:
         meta["author"] = str(info["/Author"])
     try:
         created = reader.metadata.creation_date if reader.metadata else None
-    except Exception:
+    except Exception as e:  # noqa: BLE001 - pypdf raises anything on malformed dates
+        log.debug("no creation date: %s", e)
         created = None
     if created and created.year >= 1990:
         meta["created"] = created.date().isoformat()
@@ -58,7 +59,7 @@ def _ocr_pages(path: Path, pages: int, max_chars: int) -> str:
     out, total = [], 0
     try:
         doc = pdfium.PdfDocument(str(path))
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - pdfium raises its own errors on broken files
         log.debug("cannot render %s: %s", path, e)
         return ""
     try:

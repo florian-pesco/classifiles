@@ -255,6 +255,7 @@ uv run classifiles reject 43
 uv run classifiles apply --dry-run
 uv run classifiles apply
 uv run classifiles undo
+uv run classifiles prune --older-than 90      # remove undecided proposals of old scans (asks first)
 ```
 
 `--help` works on every command. Every command takes `-c / --config path.yaml`.

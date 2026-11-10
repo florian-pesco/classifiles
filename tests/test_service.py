@@ -159,3 +159,66 @@ def test_scan_refuses_without_folder_categories(service, tree, tmp_path):
     service.invalidate()
     with pytest.raises(ValueError, match="No category folders"):
         service.scan(tree["inbox"])
+
+
+def test_new_database_has_the_current_schema_version(tmp_path):
+    from classifiles.store import SCHEMA_VERSION, Store
+
+    store = Store(tmp_path / "new.db")
+    assert store.schema_version == SCHEMA_VERSION
+    assert Store(tmp_path / "new.db").schema_version == SCHEMA_VERSION  # reopening runs nothing again
+    indexes = {r["name"] for r in store.query("SELECT name FROM sqlite_master WHERE type = 'index'")}
+    assert "proposals_path" in indexes
+
+
+def test_database_from_a_newer_version_is_refused(tmp_path):
+    import sqlite3
+
+    from classifiles.store import SCHEMA_VERSION, Store
+
+    db = tmp_path / "future.db"
+    con = sqlite3.connect(db)
+    con.execute(f"PRAGMA user_version = {SCHEMA_VERSION + 1}")
+    con.close()
+    with pytest.raises(RuntimeError, match="newer classifiles"):
+        Store(db)
+
+
+def _make_old(service, scan_id, days):
+    from datetime import datetime, timedelta
+
+    then = (datetime.now() - timedelta(days=days)).isoformat(timespec="seconds")
+    service.store.execute("UPDATE scans SET created_at = ? WHERE id = ?", (then, scan_id))
+
+
+def test_prune_keeps_decisions(service, tree):
+    old_id, rows = service.scan(tree["inbox"])
+    by_name = {r["name"]: r for r in rows}
+    service.review(by_name["meeting_notes.docx"]["id"], "accept", "Work")
+    service.review(by_name["bundle.zip"]["id"], "reject")
+    _make_old(service, old_id, 100)
+    empty_id = service.start_scan(tree["inbox"], only_new=True)  # an old scan without any proposals
+    service.store.execute("UPDATE scans SET status = 'done' WHERE id = ?", (empty_id,))
+    _make_old(service, empty_id, 100)
+    new_id, new_rows = service.scan(tree["inbox"], max_files=0)
+
+    todo = service.prune_scans(90, dry_run=True)
+    assert todo == {"proposals": 3, "scans": 1}
+    assert len(service.proposals(old_id)) == 5  # dry run changes nothing
+
+    assert service.prune_scans(90) == todo
+    kept = {r["name"] for r in service.proposals(old_id)}
+    assert kept == {"meeting_notes.docx", "bundle.zip"}
+    assert len(service.proposals(new_id)) == len(new_rows)  # recent scans untouched
+    assert {s["id"] for s in service.list_scans()} == {old_id, new_id}
+    assert service.prune_scans(90) == {"proposals": 0, "scans": 0}
+
+
+def test_prune_removes_scans_without_decisions(service, tree):
+    scan_id, _ = service.scan(tree["inbox"])
+    _make_old(service, scan_id, 10)
+    assert service.prune_scans(30) == {"proposals": 0, "scans": 0}
+    assert service.prune_scans(7) == {"proposals": 5, "scans": 1}
+    assert service.list_scans() == []
+    with pytest.raises(ValueError):
+        service.prune_scans(-1)

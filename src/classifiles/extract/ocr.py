@@ -29,7 +29,7 @@ def ocr_image(image, max_chars: int) -> str:
 
             image = np.asarray(image.convert("RGB")) if hasattr(image, "convert") else image
         result, _ = eng(image)
-    except Exception as e:
+    except Exception as e:  # noqa: BLE001 - the OCR engine raises anything on odd images
         log.debug("OCR failed: %s", e)
         return ""
     return " ".join(r[1] for r in (result or []))[:max_chars]

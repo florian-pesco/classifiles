@@ -175,6 +175,26 @@ def undo(batch_id: str | None = typer.Argument(None, help="Batch id (default: la
 
 
 @app.command()
+def prune(
+    older_than: int = typer.Option(90, "--older-than", min=0, help="Only scans started more than this many days ago"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask for confirmation"),
+    config: Path | None = ConfigOpt,
+):
+    """Remove undecided proposals of old scans, and scans left empty. Decisions are kept."""
+    svc = _service(config)
+    todo = svc.prune_scans(older_than, dry_run=True)
+    if not (todo["proposals"] or todo["scans"]):
+        console.print(f"Nothing to remove from scans older than {older_than} days.")
+        return
+    question = (f"Remove {todo['proposals']} undecided proposals and {todo['scans']} scans "
+                f"older than {older_than} days?")
+    if not (yes or typer.confirm(question)):
+        return
+    done = svc.prune_scans(older_than)
+    console.print(f"Removed {done['proposals']} proposals and {done['scans']} scans.")
+
+
+@app.command()
 def index(
     learn_past: bool = typer.Option(False, "--learn-past",
                                     help="Only learn applied files that are not learned yet (no folder scan)"),

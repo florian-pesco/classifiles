@@ -38,7 +38,7 @@ class FakeImageEmbedder:
             try:
                 with Image.open(p) as im:
                     a = np.asarray(im.convert("RGB").resize((8, 8)), dtype=np.float32).reshape(-1) / 255
-            except Exception:
+            except (OSError, ValueError):  # not a picture
                 continue
             v = np.concatenate([a, [1.0]])
             vecs.append(v / np.linalg.norm(v))
