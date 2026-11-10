@@ -5,7 +5,7 @@ import pytest
 
 from classifiles.config import Settings
 from classifiles.taxonomy import build_categories
-from classifiles_api.app import _prune
+from classifiles_api.routes.categories import _prune
 
 
 def _accept(service, rows, name, folder):

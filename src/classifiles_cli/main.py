@@ -23,6 +23,7 @@ def _service(config: Path | None, **overrides) -> ClassifilesService:
     for k, v in overrides.items():
         if v is not None:
             setattr(settings, k, v)
+    settings.validate()
     return ClassifilesService(settings)
 
 
