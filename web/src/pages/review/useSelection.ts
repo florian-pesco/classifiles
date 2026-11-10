@@ -7,10 +7,13 @@ export function useSelection(proposals: Proposal[], visible: Proposal[]) {
   const lastClicked = useRef<number | null>(null)
 
   const toggle = (id: number, shift: boolean) => {
+    // Read the anchor now: React may run the updater below only after lastClicked has moved on.
+    const anchor = lastClicked.current
+    lastClicked.current = id
     setSelected(sel => {
       const next = new Set(sel)
       const ids = visible.map(p => p.id)
-      const from = lastClicked.current == null ? -1 : ids.indexOf(lastClicked.current)
+      const from = anchor == null ? -1 : ids.indexOf(anchor)
       const to = ids.indexOf(id)
       if (shift && from >= 0 && to >= 0) {
         const on = !sel.has(id)
@@ -21,7 +24,6 @@ export function useSelection(proposals: Proposal[], visible: Proposal[]) {
       else next.add(id)
       return next
     })
-    lastClicked.current = id
   }
   const clear = useCallback(() => setSelected(new Set()), [])
   const allVisibleSelected = visible.length > 0 && visible.every(p => selected.has(p.id))
