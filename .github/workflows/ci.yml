@@ -17,7 +17,6 @@ jobs:
       # Light install: the tests use fake models, so no PyTorch / CUDA (the `examples` and `laya` extras).
       - name: Install
         run: |
-          uv venv
           uv pip install -e ".[api,cli,ocr]" numpy scikit-learn threadpoolctl pytest httpx mypy ruff
       - name: Lint
         run: uv run --no-sync ruff check src tests
