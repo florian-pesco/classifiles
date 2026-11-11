@@ -44,7 +44,7 @@ def _load(model_name: str, gpu_fraction: float, threads: int):
     kwargs = {"dtype": torch.bfloat16} if device == "cuda" else {}
     tok = load_pretrained(AutoTokenizer.from_pretrained, model_name, "tokenizer")
     model = load_pretrained(AutoModelForCausalLM.from_pretrained, model_name, "language model", **kwargs)
-    model.to(device).eval()  # type: ignore[arg-type]  # transformers' stubs type .to() too narrowly
+    model.to(device).eval()  # type: ignore[arg-type,unused-ignore]  # narrow transformers stubs; unused without them (CI)
     return tok, model, device
 
 
