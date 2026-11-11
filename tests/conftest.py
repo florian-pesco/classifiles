@@ -7,7 +7,9 @@ import pytest
 
 from classifiles import ClassifilesService, Settings
 from classifiles.deciders import KeywordDecider
+from classifiles.examples import ExampleIndex
 from classifiles.store import Store
+from fakes import FakeEmbedder
 
 FOLDERS = {
     "Finance": ("invoices, bank statements, taxes, receipts", ["Rechnung_2025.pdf", "Kontoauszug_Jan.pdf"]),
@@ -70,3 +72,48 @@ def settings(tree) -> Settings:
 @pytest.fixture
 def service(settings) -> ClassifilesService:
     return ClassifilesService(settings, decider=KeywordDecider(), store=Store(":memory:"))
+
+
+@pytest.fixture
+def sorted_tree(tree):
+    """Give each category several already-sorted files with telling names."""
+    names = {
+        "Finance": ["invoice_jan.txt", "invoice_feb.txt", "bank_statement_march.txt", "tax_return.txt"],
+        "Work": ["meeting_notes_monday.txt", "project_report.txt", "meeting_agenda.txt"],
+        "Photos": ["holiday_beach.jpg", "holiday_mountain.jpg", "camera_photo.jpg"],
+        "Software": ["setup_tool.exe", "driver_installer.msi"],
+    }
+    for cat, files in names.items():
+        sub = tree["root"] / cat / "2025"
+        sub.mkdir(exist_ok=True)
+        for f in files:
+            (sub / f).write_text(f.replace("_", " "))
+    return tree
+
+
+@pytest.fixture
+def ex_service(service):
+    service.settings.backend = "examples"
+    service._index = ExampleIndex(service.store, FakeEmbedder(), per_category=100, content_per_category=10)
+    service.settings.embedding_model = "fake"
+    service.reset_decider()  # the base fixture pre-sets the keyword decider
+    return service
+
+
+@pytest.fixture
+def sync_background(monkeypatch):
+    """Run background work (learning, index builds) right away, so tests can check its result."""
+    from classifiles import background
+
+    class Done:
+        def is_alive(self):
+            return False
+
+        def join(self, timeout=None):
+            pass
+
+    def run_now(fn, *args, name="", low_priority=True):
+        fn(*args)
+        return Done()
+
+    monkeypatch.setattr(background, "run_in_background", run_now)

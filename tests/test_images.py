@@ -1,40 +1,9 @@
 """Image similarity with a fake image model (colour histogram), so no download and no GPU."""
 
-import numpy as np
 import pytest
-from PIL import Image
 
 from classifiles.image_index import ImageIndex, is_image
-from test_examples import FakeEmbedder
-
-
-class FakeImageEmbedder:
-    """Vector = normalised mean colour + a bit of structure: same-coloured pictures are similar."""
-
-    model_name = "fake-image"
-    loaded = True
-
-    def encode_paths(self, paths):
-        vecs, ok = [], []
-        for i, p in enumerate(paths):
-            try:
-                with Image.open(p) as im:
-                    a = np.asarray(im.convert("RGB").resize((8, 8)), dtype=np.float32).reshape(-1) / 255
-            except Exception:  # noqa: BLE001
-                continue
-            v = np.concatenate([a, [1.0]])
-            vecs.append(v / np.linalg.norm(v))
-            ok.append(i)
-        return (np.stack(vecs).astype(np.float32) if vecs else np.zeros((0, 193), np.float32)), ok
-
-    def unload(self):
-        pass
-
-
-def picture(path, colour, size=(64, 48)):
-    path.parent.mkdir(parents=True, exist_ok=True)
-    Image.new("RGB", size, colour).save(path)
-    return path
+from fakes import FakeEmbedder, FakeImageEmbedder, picture
 
 
 @pytest.fixture
@@ -98,9 +67,7 @@ def test_switch_off(img_service, tree):
     assert "looks like" not in next(r for r in rows if r["name"] == "IMG_9999.jpg")["reason"]
 
 
-def test_applied_pictures_are_learned_and_forgotten(img_service, tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+def test_applied_pictures_are_learned_and_forgotten(img_service, tree, monkeypatch, sync_background):
     img_service.example_index().build(img_service.categories(refresh=True))
     img_service.image_index().build(img_service.categories(refresh=True))
     picture(tree["inbox"] / "IMG_7777.jpg", (200, 30, 30))

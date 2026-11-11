@@ -1,0 +1,67 @@
+/* Classifiles UI: one neutral graphite palette, one teal accent, generous spacing.
+   Light / dark follow the system unless the toggle in the sidebar sets data-theme. */
+
+:root {
+  color-scheme: light;
+  --bg: #f3f2ef;
+  --panel: #ebeae6;
+  --surface: #ffffff;
+  --surface-2: #f8f7f4;
+  --hover: #f0efea;
+  --border: #e3e1db;
+  --border-strong: #cdcac2;
+  --text: #1b1d1e;
+  --text-2: #4b5154;
+  --muted: #7d8284;
+  --accent: #2c7a6c;
+  --accent-strong: #22655a;
+  --accent-bg: rgb(44 122 108 / .09);
+  --accent-line: rgb(44 122 108 / .35);
+  --accent-text: #ffffff;
+  --ok: #2b8a55;    --ok-bg: rgb(43 138 85 / .1);
+  --warn: #a2680f;  --warn-bg: rgb(205 140 30 / .13);
+  --bad: #c0433a;   --bad-bg: rgb(192 67 58 / .1);
+  --info: #3b63b6;  --info-bg: rgb(59 99 182 / .09);
+  --shadow: 0 1px 2px rgb(20 20 20 / .05), 0 4px 14px rgb(20 20 20 / .05);
+  --shadow-lift: 0 10px 34px rgb(20 20 20 / .16);
+  --radius: 14px;
+  --radius-s: 9px;
+  --mono: ui-monospace, 'Cascadia Code', 'SF Mono', Consolas, monospace;
+  --display: 'Plus Jakarta Sans Variable', 'Inter Variable', system-ui, sans-serif;
+  font-family: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  font-feature-settings: 'cv11', 'ss01', 'calt';
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0f1112; --panel: #131617; --surface: #191c1e; --surface-2: #1e2224; --hover: #23282a;
+    --border: #282d30; --border-strong: #363c40;
+    --text: #e7e9ea; --text-2: #aab1b4; --muted: #7b8488;
+    --accent: #62b6a4; --accent-strong: #7fcab9; --accent-bg: rgb(98 182 164 / .12); --accent-line: rgb(98 182 164 / .4);
+    --accent-text: #0a1513;
+    --ok: #6ec592;    --ok-bg: rgb(110 197 146 / .12);
+    --warn: #e3b260;  --warn-bg: rgb(227 178 96 / .12);
+    --bad: #ef7c70;   --bad-bg: rgb(239 124 112 / .12);
+    --info: #92b5f0;  --info-bg: rgb(146 181 240 / .12);
+    --shadow: 0 1px 2px rgb(0 0 0 / .3);
+    --shadow-lift: 0 12px 40px rgb(0 0 0 / .55);
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0f1112; --panel: #131617; --surface: #191c1e; --surface-2: #1e2224; --hover: #23282a;
+  --border: #282d30; --border-strong: #363c40;
+  --text: #e7e9ea; --text-2: #aab1b4; --muted: #7b8488;
+  --accent: #62b6a4; --accent-strong: #7fcab9; --accent-bg: rgb(98 182 164 / .12); --accent-line: rgb(98 182 164 / .4);
+  --accent-text: #0a1513;
+  --ok: #6ec592;    --ok-bg: rgb(110 197 146 / .12);
+  --warn: #e3b260;  --warn-bg: rgb(227 178 96 / .12);
+  --bad: #ef7c70;   --bad-bg: rgb(239 124 112 / .12);
+  --info: #92b5f0;  --info-bg: rgb(146 181 240 / .12);
+  --shadow: 0 1px 2px rgb(0 0 0 / .3);
+  --shadow-lift: 0 12px 40px rgb(0 0 0 / .55);
+}
+

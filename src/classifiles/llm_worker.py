@@ -17,6 +17,7 @@ then loaded offline.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -29,23 +30,21 @@ SYSTEM = ("You sort files into folders. You are given a file and up to three can
           "the file belongs in, and nothing else.")
 
 
+
 def _load(model_name: str, gpu_fraction: float, threads: int):
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    from classifiles.hf import load_pretrained
 
     torch.set_num_threads(threads)
     device = "cuda" if torch.cuda.is_available() else "cpu"
     if device == "cuda":
         torch.cuda.set_per_process_memory_fraction(gpu_fraction)
     kwargs = {"dtype": torch.bfloat16} if device == "cuda" else {}
-    try:  # offline first; download only if the model isn't cached yet
-        tok = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
-        model = AutoModelForCausalLM.from_pretrained(model_name, local_files_only=True, **kwargs)
-    except OSError:
-        tok = AutoTokenizer.from_pretrained(model_name)
-        model = AutoModelForCausalLM.from_pretrained(model_name, **kwargs)
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    model.to(device).eval()
+    tok = load_pretrained(AutoTokenizer.from_pretrained, model_name, "tokenizer")
+    model = load_pretrained(AutoModelForCausalLM.from_pretrained, model_name, "language model", **kwargs)
+    model.to(device).eval()  # type: ignore[arg-type,unused-ignore]  # narrow transformers stubs; unused without them (CI)
     return tok, model, device
 
 
@@ -89,14 +88,12 @@ def main(argv: list[str] | None = None) -> None:
     ap.add_argument("--gpu-fraction", type=float, default=0.7)
     ap.add_argument("--threads", type=int, default=2)
     args = ap.parse_args(argv)
-    try:
+    with contextlib.suppress(OSError):
         os.nice(10)
-    except OSError:
-        pass
     out = sys.stdout
     try:
         tok, model, device = _load(args.model, args.gpu_fraction, args.threads)
-    except Exception as e:  # noqa: BLE001 - reported to the parent
+    except Exception as e:  # noqa: BLE001 - reported to the parent process, which records it
         out.write(json.dumps({"ready": False, "error": str(e)[:500]}) + "\n")
         out.flush()
         return
@@ -118,7 +115,7 @@ def main(argv: list[str] | None = None) -> None:
                 res = {"id": req.get("id"), "probs": choose(tok, model, device, req["prompt"], req["options"])}
             else:
                 res = {"id": req.get("id"), "error": f"unknown task {req.get('task')!r}"}
-        except Exception as e:  # noqa: BLE001 - one bad request must not stop the worker
+        except Exception as e:  # noqa: BLE001 - one bad request must not end the worker
             res = {"id": req.get("id") if isinstance(req, dict) else None, "error": str(e)[:500]}
         out.write(json.dumps(res) + "\n")
         out.flush()

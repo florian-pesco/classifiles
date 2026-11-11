@@ -32,7 +32,7 @@ There are three layers. Only the bottom one contains logic.
  └───────────┬───────────────────────────┬──────────────┘
              │                           │
      ┌───────▼────────┐          ┌───────▼────────────────────────┐
-     │ Laya model     │          │ Your files + SQLite DB         │
+     │ Local models   │          │ Your files + SQLite DB         │
      │ (PyTorch, GPU) │          │ ~/.local/share/classifiles/... │
      └────────────────┘          └────────────────────────────────┘
 ```
@@ -43,21 +43,22 @@ The CLI and the API are both thin shells around `ClassifilesService`. A future L
 
 ## 2. Runtime: what actually runs where
 
-Everything runs inside WSL (Ubuntu). There are no background services, Docker containers or separate model servers.
+Everything runs inside WSL (Ubuntu). There are no background services, Docker containers or model servers;
+the only extra process is the optional language-model worker (§4h).
 
 | Piece | What it is | Where it lives | When it runs |
 |---|---|---|---|
 | Python env | `.venv/` (Python 3.12, PyTorch with CUDA, Laya, FastAPI, …) | `classifiles/.venv/` (~5.8 GB) | Created by `uv sync`. |
-| Model weights | Laya English, ModernBERT-large, 421M params, float32 | `~/.cache/huggingface/hub/` (~843 MB) | Downloaded on first use, then read from disk. |
-| Model in memory | Loaded by `LayaDecider` **inside the Python process** | GPU memory (~2.5 GB) | Loaded lazily on the first scan, freed when the process exits. |
+| Model weights | text embedding (Qwen3-Embedding-0.6B), picture model (SigLIP2-base); optional: language model (Qwen3.5-2B), Laya | `~/.cache/huggingface/hub/` | Downloaded once on first use, then offline (`hf.py`). |
+| Models in memory | Loaded lazily **inside the Python process**, with a GPU memory cap; the language model runs in its own worker process | GPU memory (≈1–2 GB; the worker more) | On first use; the worker exits after its step. |
 | Web server | uvicorn running the FastAPI app | process started by `classifiles serve` | Until you press Ctrl+C. |
 | Web UI | Static HTML/JS built into `web/dist/` | served by the same FastAPI process | Whenever the server runs. |
 | Database | SQLite file | `~/.local/share/classifiles/classifiles.db` (default) | Opened by every CLI/server process. |
 | Config | YAML file | `~/.config/classifiles/config.yaml` (default) | Read at startup; the UI's Settings dialog writes it. |
 
 Consequences:
-- `classifiles scan` (CLI) starts Python, loads the model (a few seconds), classifies and exits, so the
-  model is loaded for every scan. `classifiles serve` keeps the model loaded between scans.
+- `classifiles scan` (CLI) starts Python, loads the models (a few seconds), classifies and exits, so the
+  models are loaded for every scan. `classifiles serve` keeps them loaded between scans.
 - The CLI and the web server share the same database. You can scan in the UI and `apply` from the CLI.
 - The server binds to `127.0.0.1` only. It has no login, so don't expose it on a network.
 
@@ -93,7 +94,13 @@ Consequences:
      │           = "needs_review"  otherwise                                  │
      │    → INSERT into proposals table (store.py)                            │
      └────────────────────────────────────────────────────────────────────────┘
+     ▼
+ after all files: folder inside the category (§4d), duplicates (§4g), suggested names (§4e),
+ optional language-model step (§4h: second opinion, name choice)
 ```
+
+With the examples backend, the options only name the allowed categories; the probabilities come from
+the files you already sorted (§4a). The text below matters most for Laya (§4i).
 
 What the model actually sees for one file (`Evidence.to_state()`):
 
@@ -114,17 +121,19 @@ Photos  → "files about Photos, e.g. IMG_0001.jpg, …"   ← no description co
 ```
 
 A category with a description (set on the Categories page) is described by that text alone. One without
-falls back to its name plus the 3 most recently modified filenames inside it. The model only gets
-a small text budget per folder (see §4), so a short, well-chosen description is the main accuracy
-lever.
+falls back to its name plus the 3 most recently modified filenames inside it. Laya only gets a small
+text budget per folder (§4i), so for Laya a short, well-chosen description is the main accuracy lever.
+The examples backend adds each description as one extra example of its category.
 
 ## 4. The models: how the decision works
 
-There are two real backends (Settings → Model):
+There are two real backends (Settings → Model). The parts below are in reading order: the example
+index (4a) is the base; 4b–4c refine its vote; 4d–4h add what the review shows next to the category;
+4i is the description-only alternative.
 
 - **Learn from my folders** (`examples`, recommended): compares a file with the files you already
   sorted. It needs no descriptions. See §4a.
-- **Laya**: decides from the category descriptions only. See §4b. It has never seen your files, so
+- **Laya**: decides from the category descriptions only. See §4i. It has never seen your files, so
   it can only match words.
 
 Measured with `classifiles eval -b examples -b laya -n 40` on a real archive (5 categories, ~10k
@@ -196,99 +205,7 @@ for each category folder:                                 query text = file name
   (e.g. an unmounted drive). Otherwise every file would go to whatever category is left, such as
   Delete, with high confidence.
 
-### 4c. Folder inside the category (`paths.py`)
-
-- **Suggestion:** the k nearest examples of the chosen category vote with their folders, and every
-  prefix of a folder gets the neighbour's weight. The deepest prefix with ≥60% of the category's
-  weight is `suggested_subpath` (`''` = category folder). Stored neighbours (`proposals.neighbours`)
-  let a category change recompute it without re-embedding.
-- **New folders:**
-  1. *Numbered sibling:* the suggested folder ends in a number (`Econ 1`, `2025`, `Order35`) and the
-     file name has the same word with another number. If that sibling exists, it becomes the
-     suggestion. Otherwise it is offered as `new_folder`, and the default falls back to the shared
-     parent.
-  2. *Container:* similar files are spread over several subfolders with no favourite. Similar inbox
-     files of the same scan (cosine ≥ 0.8) are grouped, and one name is made from their shared
-     file-name words.
-- **Safety:** `normalize_subpath` rejects `..`, Windows-invalid characters and trailing dots/spaces.
-  `plan_move` checks the target stays inside the category, and folders are only created by
-  `execute()` on Apply. The journal stores `created_dir`, and `revert()` removes created folders
-  again if they're empty.
-- **Learning:** applied files are learned with their path inside the category
-  (`moves.category_key` + relative path), so later suggestions include folders created on Apply.
-
-### 4f. Pictures (`image_index.py`)
-
-- **Model:** the image part of SigLIP2-base (`SiglipVisionModel`, 93M parameters, fp16, ≈0.2–0.3 GB GPU
-  memory, ~60 ms per picture in a batch). It loads lazily and runs offline after the one-time download.
-- **Index:** table `image_examples`. Up to `images_per_category` pictures per category, sampled evenly
-  over subfolders, files > 40 MB skipped, JPEGs decoded at reduced size (draft mode). Built in the
-  index thread after the text index and the duplicate catalog; incremental by mtime, batches of 32
-  with pauses, cancellable. Applied pictures are learned; undo removes them.
-- **Classification:** for an inbox picture, the 10 nearest sorted pictures vote (weights
-  `exp((sim − best) / 0.02)`). This is combined with the text result:
-  `P ∝ P_text^(1−w) · P_image^w`, `w = image_weight` (default 0.5). The nearest pictures also vote
-  for the folder inside the category; the reason shows "looks like: …".
-- **Measured** (`evaluate_images`, 192 held-out sorted pictures):
-  - text only 75% / 65% (file / folder split) → combined **81% / 74%**;
-  - at confidence ≥ 0.8, 82% of pictures were suggested, 91% of them right (text only: 59%, 87%).
-
-  On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
-  pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
-
-### 4i. Suggested file names (`naming.py`)
-
-- **Shape:** `<Subject>_<Type>_<Detail>.<ext>`, topic first; each part PascalCase, parts joined by `_`,
-  stem ≤ 60 characters, umlauts transliterated (setting), extension lowercase.
-- **Scope** (`in_scope`): documents (pdf/office/text) and pictures that are screenshots or scans
-  (OCR text). Photos, videos, archives, installers and code keep their names, and so do duplicates
-  and Delete.
-- **Rules (at scan time):**
-  - **Clean-up:** copy markers, UUIDs/hex IDs, times, version/"final" tokens.
-  - **Date:** from the text after a date word (`Rechnungsdatum`, `Invoice date`), else from the name,
-    else the first date in the text; German/English/ISO formats, plausibility checked; the
-    modified date is never used.
-  - **Type:** bilingual keyword table (name hits weigh 3, text 1); the type word follows the
-    document's language.
-  - **Subject candidates:** subfolder (not years or generic folders) → sender (`GmbH/AG/Inc …`,
-    non-free-mail domain) → words of the original name → download site.
-  - **Detail:** the date for dated types (invoice, contract, …), else a count token (`Lecture03`, `Blatt04`).
-- **Language model** (`name_llm`, off by default): in the same model session as the second opinion
-  (`run_llm_steps`), for in-scope files with ≥ 150 characters of text. Multiple choice with rotated
-  options: the type among ≤ 5 likely types + "other"; the subject among the rule candidates +
-  "none". It never writes names. The choice is stored in `proposals.name_llm` and survives
-  folder changes. Measured: 0.4 s per file; for 20 real files it gave a type to 10 the rules
-  couldn't type, kept the rules' type for 7 and the first subject candidate for 17.
-- **Review/apply:**
-  - `proposals.suggested_name` / `new_name` (NULL = keep) / `name_reason`;
-  - `review(name=…, use_suggested_name=…)`, with bulk support; a chosen suggestion follows
-    category/folder changes, a typed name stays;
-  - `plan_move(name=…)`; collisions become `_2`, `_3`; undo moves back to the original path.
-
-#### Photos and videos (`naming.suggest_media`, `labels.py`, `places.py`, `extract/video.py`)
-
-- **Shape:** `<original core>_<Title>`.
-  - **Core:** the original stem with copy markers removed, spaces → `_`. A meaningless core
-    (hash, bare number) becomes the date taken.
-  - **Title:** ≤ 2 parts from topic folder → picture recognition → GPS town; the source app
-    (WhatsApp, Signal, Telegram, screen recording) only when nothing else is known. Words already
-    in the core are skipped.
-  - Screenshots and pictures with OCR text stay with the document rules.
-- **Recognition:** zero-shot with the SigLIP2 checkpoint already used for picture similarity.
-  - The ~60 German labels' English prompts (plus 4 "nothing special" prompts) are embedded once
-    with the text tower on the CPU (8 s) and cached in `label_features` with the logit scale.
-  - Each picture is labelled from its existing vector (the vision tower's pooled output equals
-    `get_image_features`); a label needs ≥ 45% softmax share and must beat the null prompts.
-  - Videos: OpenCV middle frame (files ≤ 500 MB).
-- **GPS:** EXIF GPS IFD (`extract/image.py`) and MP4 `©xyz` / Apple ISO 6709 (`extract/video.py`,
-  also `mvhd` creation time). Nearest town from GeoNames `cities15000` (CC BY 4.0, downloaded once
-  to `~/.cache/classifiles/`, 0.5 MB as npz), ≤ 30 km.
-- **Hints** (`proposals.name_hints`: label, share, place, app) are computed at scan time, so a
-  folder change recomputes the name without reading the file again.
-- **Measured** on 97 real inbox photos/videos: 63 get a suggestion, 48 a label (median share 0.73),
-  13 of 13 with GPS a town.
-
-### 4h. Trained classifier (`trained.py`, `classifiles eval --trained`)
+### 4b. Trained classifier (`trained.py`, `classifiles eval --trained`)
 
 Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
 
@@ -338,7 +255,100 @@ Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
   - real decisions 83% → 81% (within noise);
   - single held-out files 78% → 85%.
 
-### 4g. Batches and learning from decisions (`batches.py`, `service.relearn`)
+### 4c. Pictures (`image_index.py`)
+
+- **Model:** the image part of SigLIP2-base (`SiglipVisionModel`, 93M parameters, fp16, ≈0.2–0.3 GB GPU
+  memory, ~60 ms per picture in a batch). It loads lazily and runs offline after the one-time download.
+- **Index:** table `image_examples`. Up to `images_per_category` pictures per category, sampled evenly
+  over subfolders, files > 40 MB skipped, JPEGs decoded at reduced size (draft mode). Built in the
+  index thread after the text index and the duplicate catalog; incremental by mtime, batches of 32
+  with pauses, cancellable. Applied pictures are learned; undo removes them.
+- **Classification:** for an inbox picture, the 10 nearest sorted pictures vote (weights
+  `exp((sim − best) / 0.02)`). This is combined with the text result:
+  `P ∝ P_text^(1−w) · P_image^w`, `w = image_weight` (default 0.5). The nearest pictures also vote
+  for the folder inside the category; the reason shows "looks like: …".
+- **Measured** (`evaluate_images`, 192 held-out sorted pictures):
+  - text only 75% / 65% (file / folder split) → combined **81% / 74%**;
+  - at confidence ≥ 0.8, 82% of pictures were suggested, 91% of them right (text only: 59%, 87%).
+
+  On 27 real picture decisions it was neutral (19 → 18 right; it lost on one category whose sorted
+  pictures look different from what arrives in the inbox), so the weight is adjustable in Settings.
+
+### 4d. Folder inside the category (`paths.py`)
+
+- **Suggestion:** the k nearest examples of the chosen category vote with their folders, and every
+  prefix of a folder gets the neighbour's weight. The deepest prefix with ≥60% of the category's
+  weight is `suggested_subpath` (`''` = category folder). Stored neighbours (`proposals.neighbours`)
+  let a category change recompute it without re-embedding.
+- **New folders:**
+  1. *Numbered sibling:* the suggested folder ends in a number (`Econ 1`, `2025`, `Order35`) and the
+     file name has the same word with another number. If that sibling exists, it becomes the
+     suggestion. Otherwise it is offered as `new_folder`, and the default falls back to the shared
+     parent.
+  2. *Container:* similar files are spread over several subfolders with no favourite. Similar inbox
+     files of the same scan (cosine ≥ 0.8) are grouped, and one name is made from their shared
+     file-name words.
+- **Safety:** `normalize_subpath` rejects `..`, Windows-invalid characters and trailing dots/spaces.
+  `plan_move` checks the target stays inside the category, and folders are only created by
+  `execute()` on Apply. The journal stores `created_dir`, and `revert()` removes created folders
+  again if they're empty.
+- **Learning:** applied files are learned with their path inside the category
+  (`moves.category_key` + relative path), so later suggestions include folders created on Apply.
+
+### 4e. Suggested file names (`naming.py`)
+
+- **Shape:** `<Subject>_<Type>_<Detail>.<ext>`, topic first; each part PascalCase, parts joined by `_`,
+  stem ≤ 60 characters, umlauts transliterated (setting), extension lowercase.
+- **Scope** (`in_scope`): documents (pdf/office/text) and pictures that are screenshots or scans
+  (OCR text). Photos and videos get their own shape (below). Archives, installers, code and other
+  files only lose copy markers (`x (1).zip` → `x.zip`, `suggest_cleanup`). Duplicates and Delete keep
+  their names.
+- **Rules (at scan time):**
+  - **Clean-up:** copy markers, UUIDs/hex IDs, times, version/"final" tokens.
+  - **Date:** from the text after a date word (`Rechnungsdatum`, `Invoice date`), else from the name,
+    else the first date in the text; German/English/ISO formats, plausibility checked; the
+    modified date is never used.
+  - **Type:** bilingual keyword table (name hits weigh 3, text 1); the type word follows the
+    document's language.
+  - **Subject candidates:** subfolder (not years or generic folders) → sender (`GmbH/AG/Inc …`,
+    non-free-mail domain) → words of the original name → download site.
+  - **Detail:** the date for dated types (invoice, contract, …), else a count token (`Lecture03`, `Blatt04`).
+- **Language model** (`name_llm`, off by default): in the same model session as the second opinion
+  (`run_llm_steps`), for in-scope files with ≥ 150 characters of text. Multiple choice with rotated
+  options: the type among ≤ 5 likely types + "other"; the subject among the rule candidates +
+  "none". It never writes names. The choice is stored in `proposals.name_llm` and survives
+  folder changes. Measured: 0.4 s per file; for 20 real files it gave a type to 10 the rules
+  couldn't type, kept the rules' type for 7 and the first subject candidate for 17.
+- **Review/apply:**
+  - `proposals.suggested_name` / `new_name` (NULL = keep) / `name_reason`;
+  - `review(name=…, use_suggested_name=…)`, with bulk support; a chosen suggestion follows
+    category/folder changes, a typed name stays;
+  - `plan_move(name=…)`; collisions become `_2`, `_3`; undo moves back to the original path.
+
+#### Photos and videos (`naming.suggest_media`, `labels.py`, `places.py`, `extract/video.py`)
+
+- **Shape:** `<original core>_<Title>`.
+  - **Core:** the original stem with copy markers removed, spaces → `_`. A meaningless core
+    (hash, bare number) becomes the date taken.
+  - **Title:** ≤ 2 parts from topic folder → picture recognition → GPS town; the source app
+    (WhatsApp, Signal, Telegram, screen recording) only when nothing else is known. Words already
+    in the core are skipped.
+  - Screenshots and pictures with OCR text stay with the document rules.
+- **Recognition:** zero-shot with the SigLIP2 checkpoint already used for picture similarity.
+  - The ~60 German labels' English prompts (plus 4 "nothing special" prompts) are embedded once
+    with the text tower on the CPU (8 s) and cached in `label_features` with the logit scale.
+  - Each picture is labelled from its existing vector (the vision tower's pooled output equals
+    `get_image_features`); a label needs ≥ 45% softmax share and must beat the null prompts.
+  - Videos: OpenCV middle frame (files ≤ 500 MB).
+- **GPS:** EXIF GPS IFD (`extract/image.py`) and MP4 `©xyz` / Apple ISO 6709 (`extract/video.py`,
+  also `mvhd` creation time). Nearest town from GeoNames `cities15000` (CC BY 4.0, downloaded once
+  to `~/.cache/classifiles/`, 0.5 MB as npz), ≤ 30 km.
+- **Hints** (`proposals.name_hints`: label, share, place, app) are computed at scan time, so a
+  folder change recomputes the name without reading the file again.
+- **Measured** on 97 real inbox photos/videos: 63 get a suggestion, 48 a label (median share 0.73),
+  13 of 13 with GPS a town.
+
+### 4f. Batches and learning from decisions (`batches.py`, `service.relearn`)
 
 - **Stored vectors.** Each example-model proposal keeps the vectors computed during the scan
   (`proposals.qvec` text, `proposals.ivec` picture, float16). Everything below works on these, so it
@@ -359,7 +369,7 @@ Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
   1. every accepted (or applied) file of the scan, except rule hits and duplicates, becomes a
      temporary example `("<category key>", "@decided:<name>/<subpath>", vector)`;
   2. every undecided example-model proposal is re-scored: its nearest stored examples plus the
-     temporary ones vote as usual (`vote()`, `ExampleDecider.score(extra=…)`), pictures blended as in 4f;
+     temporary ones vote as usual (`vote()`, `ExampleDecider.score(extra=…)`), pictures blended as in 4c;
   3. category, confidence, status, alternatives, reason and subfolder (the decided files vote for
      their folder too) are updated; `relearned = 1` if the result differs from the model alone.
 
@@ -369,7 +379,7 @@ Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
   ≈ 0.06 s for 600 undecided files against 10k examples (first one ≈ 0.16 s). Permanent learning
   still happens only on Apply (4a).
 
-### 4e. Duplicates (`duplicates.py`)
+### 4g. Duplicates (`duplicates.py`)
 
 - **Exact only:** byte-for-byte identical content. Candidates narrow in three steps: same size →
   same quick hash (first 64 KB + size) → same full BLAKE2b hash. Files with a unique size are never
@@ -387,7 +397,7 @@ Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
   preview. `_plan()` re-checks right before a duplicate is trashed and refuses ("Not deleted: …") if
   the kept copy is gone or no longer identical.
 
-### 4d. Second opinion (`llm.py`, `llm_worker.py`)
+### 4h. Second opinion (`llm.py`, `llm_worker.py`)
 
 - **Gating:** example-model proposals below the threshold, with ≥150 characters of text or a file name
   with ≥2 meaningful words, and ≥2 candidate categories; at most `llm_max_files` per scan.
@@ -405,14 +415,14 @@ Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
   Review. Measured on real data (unsure files only, small samples):
   - when both agree, the first choice was right 11 of 13 times on real decisions, but only 6 of 16
     times for files of unsorted topics (folder split);
-  - blending the model into the confidence ("confirm only", 4B) lifted 10 of 11 unsure real
+  - blending the model into the confidence ("confirm only") lifted 10 of 11 unsure real
     decisions correctly above the threshold, but on new topics only 6 of 11.
 
   Because of that risk, it doesn't change confidence; `evaluate_second_opinion` /
   `classifiles eval --second-opinion` keep the comparison.
 - **For later:** the worker has a `task` field, so naming folders and files can be added as new tasks.
 
-### 4b. Laya
+### 4i. Laya
 
 **Laya** is an open "System One" decision model (Apache-2.0). It is an open alternative to TypeSafe's Jev.
 It does **not** generate text. It reads the state and the options in one forward pass of a
@@ -432,6 +442,10 @@ makes a confidence threshold meaningful.
   So with more than 10 folders, `deciders/laya.py` uses `laya.predict_tournament` with groups of ≤10:
   a winner per group, then a final decision among the winners.
 - Speed: about 30 ms per file on the RTX 5070. Extraction (PDF parsing, OCR) usually takes longer than the model.
+- **Language.** In a 14-folder test with German content, the English checkpoint got 3/6 right and the
+  multilingual one (`laya_model: ml`) 5/6. A small sample, but for mostly German files try `ml`.
+- **Confidence with more than 10 folders** is computed among the tournament's finalists only, so it
+  means somewhat less than with ≤10 folders.
 
 Other backends implement the same one-method interface (`deciders/base.py`):
 
@@ -493,7 +507,7 @@ Each category has an **action**:
 
 ## 7. Database (`store.py`)
 
-One SQLite file, four tables:
+One SQLite file. The main tables:
 
 | Table | One row per | Key columns |
 |---|---|---|
@@ -501,6 +515,13 @@ One SQLite file, four tables:
 | `proposals` | file in a scan | path, evidence (JSON), target, confidence, alternatives (JSON top 4), source, status, final_target, decided_via, neighbours (JSON), suggested_subpath, subpath, new_folder, qvec/ivec (stored vectors), relearned, suggested_name, new_name, name_reason, name_llm |
 | `moves` | applied operation | batch_id, src, dst, action (move/copy/delete), category_key, created_dir, moved_at, undone_at, purged_at (trash emptied) |
 | `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16), qvector (inbox-style, for training) |
+| `image_examples` | sorted picture (vector) | category_key, relpath, mtime, model, vector (§4c) |
+| `catalog` | file in a folder category | size, mtime, quick and full hash, for duplicates (§4g) |
+| `classifiers` | trained model | embedding model, category keys, coefficients, C, temperature (§4b) |
+| `label_features` | picture label set | cached text vectors of the label prompts, logit scale and bias (§4e) |
+
+Schema changes are numbered steps in `MIGRATIONS` (`store.py`). The database records how many it
+has run (`PRAGMA user_version`), so each runs once; a database from a newer version is refused.
 
 You can inspect it directly:
 
@@ -515,34 +536,55 @@ sqlite3 ~/.local/share/classifiles/classifiles.db "select name, final_target, co
 ```
 src/classifiles/
   __init__.py          exports ClassifilesService, Settings
-  config.py            Settings dataclass ⇄ YAML. Add a setting: add a field here.
-  service.py           ClassifilesService — the facade. Every user action is a method here:
-                         categories, select_files, start_scan/run_scan/scan, proposals, review,
-                         accept_suggested, plan_apply, apply, moves, undo
+  config.py            Settings dataclass ⇄ YAML, allowed ranges (Settings.validate). New setting: a field here.
+  service/             ClassifilesService, the facade: every user action is a method. One mixin per topic:
+    core.py              construction, decider and classifier
+    categories.py        categories, rules, drive guard (check_ready), invalidate
+    scanning.py          select_files, start_scan / run_scan, read_file, duplicates, new folders
+    reviewing.py         proposals, review, bulk_review, accept_suggested, batches, relearn
+    names.py             suggested names on proposals (rules, picture hints, language-model choice)
+    applying.py          plan_apply, apply, undo, moves, batches, trash, duplicate_details
+    learning.py          index builds (text, pictures, catalog), learning from applied files, retraining
+    llm_steps.py         the language-model step of a scan (second opinion, name choice)
+    helpers.py           skip lists, vector helpers; base.py declares the shared attributes for mypy
   taxonomy.py          build_categories(): roots' subfolders + manual entries + Delete; option_text()
-  extract/
-    __init__.py        dispatch by file kind; never lets a broken file crash a scan
-    base.py            KINDS (extension → kind table), Evidence, to_state()
-    pdf.py office.py text.py image.py archive.py   one extractor per family
+  extract/             one extractor per family (pdf, office, text, image, archive, video) + ocr.py;
+                         base.py: KINDS and Evidence; __init__.py never lets a broken file crash a scan
   rules.py             rule syntax (ext/kind/name/glob) and matching
-  deciders/            model backends behind the Decider protocol (+ make_decider factory)
   classifier.py        rules → decider → Classification(target, confidence, alternatives)
-  store.py             SQLite schema + tiny helpers
-  mover.py             plan_move / execute / revert / purge: move, copy, trash (safety checks)
-  embedder.py          local embedding model with resource caps (lazy, offline after download)
+  deciders/            backends behind the Decider protocol: examples, laya, keyword (+ make_decider)
+  embedder.py          local text embedding model with resource caps
   examples.py          example index: sample folders, build/update, kNN query, learn/forget
-  batches.py           batch suggestions for Review (name pattern, similar content, same proposal/doubt)
   trained.py           trained classifier (logistic regression on inbox-style vectors)
-  naming.py            suggested file names (Subject_Type_Detail)
-  evaluate.py          hold-out evaluation (`classifiles eval`)
-src/classifiles_api/app.py   create_app(): REST endpoints, background scan thread, serves web/dist
+  image_index.py       picture index and picture similarity
+  paths.py             folder inside the category: suggestion, new folders, validation
+  naming.py            suggested file names; labels.py: what a picture shows; places.py: GPS → town
+  batches.py           batch suggestions for Review
+  duplicates.py        exact duplicates: catalog of the sorted folders, inbox check
+  llm.py, llm_worker.py  local language model in its own process (second opinion, name choice)
+  source.py            download source (Windows Zone.Identifier → domain)
+  hf.py                load models from the Hugging Face cache: download once, then offline
+  background.py        background threads and debounced timers (low priority, errors logged)
+  store.py             SQLite schema, migrations, small helpers
+  mover.py             plan_move / execute / revert / purge: move, copy, trash (safety checks)
+  evaluate.py          measurements (`classifiles eval`, the Quality card); aggregates only
+src/classifiles_api/
+  app.py               create_app(): includes the routers, serves web/dist
+  routes/              one router per area: settings · categories (+ rules, folder picker) · index ·
+                         scans (+ proposals, preview, open) · history (apply, quality, undo, trash)
+  models.py, deps.py   request bodies; service dependency, error mapping (guard), path stripping
+  windows.py           open a file in Windows, list drives
 src/classifiles_cli/main.py  `classifiles` command (typer)
-web/src/api.ts               typed fetch wrappers for every endpoint
-web/src/App.tsx              app shell: sidebar navigation, theme switch (light/auto/dark), notices
-web/src/pages/*.tsx          Review, Categories, Rules, History & trash, Settings
-web/src/components/*.tsx     rows' editors (folder, name), batches, bulk bar, compare, preview, icons
-web/src/index.css            design tokens (light/dark) and all styles
-tests/                       pytest; conftest.py builds a throwaway folder tree per test
+web/src/
+  api.ts               typed fetch wrappers and result types for every endpoint
+  App.tsx              app shell: sidebar navigation, theme switch (light/auto/dark), notices
+  messages.ts          notify / fail for every page (React context)
+  pages/*.tsx          Review, Categories, Rules, History & trash, Settings
+  pages/review/        Review's hooks (scan, proposals with a stable order, selection) and parts
+                         (scan bar, status filters, proposal row)
+  components/          shared parts: folder and name editors, batches, bulk bar, compare, preview, icons
+  styles/              tokens.css (colours, light/dark), base, layout, one file per area, responsive last
+tests/                 pytest; conftest.py and fakes.py: throwaway folder trees and fake models
 ```
 
 Common modifications:
@@ -556,9 +598,10 @@ Common modifications:
 | Change what the model reads | `Evidence.to_state()` (`extract/base.py`) and `Category.option_text()` (`taxonomy.py`). |
 | Change the question wording | `QUESTION` in `classifier.py`. |
 | Try another model | New class in `deciders/` with `choose()`, register it in `deciders/__init__.py::make_decider`, set `backend:` in config. |
-| Use the multilingual Laya (better for German) | Set `laya_model: ml` in the YAML. See §10 for the comparison. |
-| Add a new action/endpoint | Method on `ClassifilesService` first; then expose it in `app.py` and/or `main.py`; then `api.ts` + UI. |
-| Skip more junk files | `SKIP_SUFFIXES` / `SKIP_NAMES` in `service.py`. |
+| Use the multilingual Laya (better for German) | Set `laya_model: ml` in the YAML. See §4i for the comparison. |
+| Add a new action/endpoint | Method on `ClassifilesService` first (the mixin of its topic in `service/`); then a route in `classifiles_api/routes/` and/or a command in `main.py`; then `api.ts` + UI. |
+| Add a setting | Field in `config.py` (+ range in `Settings.RANGES`), `SettingsPatch` in `classifiles_api/models.py`, `Settings` in `api.ts`, the Settings page. |
+| Skip more junk files | `SKIP_SUFFIXES` / `SKIP_NAMES` in `service/helpers.py`. |
 
 After changing Python code: restart `classifiles serve`. After changing `web/src`: run
 `npm run build` in `web/` (or use the dev server, see USAGE.md).
@@ -574,57 +617,56 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | GET / PUT | `/categories` | roots, Delete settings, and the full category list / save them (`?refresh=true` re-reads folders) |
 | GET / PUT | `/rules` | rules (+ list of file kinds) / validate and save |
 | GET | `/fs?path=` | list subfolders (folder picker) |
-| GET | `/proposals/{id}/file` | the file itself, for preview |
-| POST | `/proposals/{id}/open?reveal=` | open in Windows / show in Explorer |
+| GET | `/categories/subfolders?category=&path=` | subfolders inside a category (folder editor) |
+| GET | `/proposals/{id}/file?duplicate=` | the file itself, for preview (or the copy it duplicates) |
+| GET | `/proposals/{id}/duplicate` | both copies of a duplicate, re-checked now (Compare view) |
+| POST | `/proposals/{id}/open?reveal=&duplicate=` | open in Windows / show in Explorer |
 | GET | `/batches` | applied batches, for History |
 | GET / POST | `/trash`, `/trash/empty` | trash contents / delete permanently |
 | GET | `/index` | example index: build status, example counts per category |
 | POST | `/index/build`, `/index/cancel` | start (background) / cancel an index build |
 | POST | `/index/retrain` | train the classifier again now (background) |
+| POST | `/index/learn-past` | learn applied files that were never learned (no file access) |
 | POST | `/scans` `{inbox?, max_files?, only_new?}` | start a scan in a background thread; returns the scan row. `max_files`: omitted/null = settings default, 0 = all |
 | GET | `/scans`, `/scans/{id}` | list scans / progress of one |
+| POST | `/scans/second-opinion/cancel` | stop the language-model step of a running scan |
 | GET | `/proposals?scan_id=&status=` | proposals (default: latest scan) |
 | PATCH | `/proposals/{id}` `{action, folder?, subpath?, name?, use_suggested_name?}` | accept / reject / reset; `relearned_others`: proposals updated from this decision |
-| POST | `/proposals/bulk` `{ids, action, folder?, subpath?}` | the same for several; returns `updated`, `errors`, `relearned` |
+| POST | `/proposals/bulk` `{ids, action, folder?, subpath?, use_suggested_name?}` | the same for several; returns `updated`, `errors`, `relearned` |
 | GET | `/scans/{id}/batches` | suggested batches to review together |
 | POST | `/scans/{id}/relearn` | re-score the undecided proposals from the decisions (normally automatic) |
-| POST | `/proposals/accept-suggested` `{scan_id}` | accept everything ≥ threshold |
+| POST | `/proposals/accept-suggested` `{scan_id, top_level?}` | accept everything ≥ threshold (`top_level`: category folders only) |
 | POST | `/apply/plan` `{scan_id}` | dry run |
 | POST | `/apply` `{scan_id}` | move accepted files |
+| GET | `/quality?rerun=` | how right proposals were against your decisions (aggregates) |
 | GET | `/moves` | move journal |
 | POST | `/undo?batch_id=` | undo a batch (default: last) |
 
-## 10. Limitations of this first version
+## 10. Limitations
 
 Be aware of these before relying on it:
 
-**Classification quality**
+**Classification**
 - **Top-level files only.** Subfolders inside the inbox (e.g. an unzipped folder) are ignored.
-- **English model by default.** In a 14-folder test with German content (Laborbefund,
-  Mietvertrag, Kfz-Versicherung), the English model got 3/6 right. The multilingual checkpoint
-  (`laya_model: ml`) got 5/6, and its one "miss" (Kfz-Versicherung → Insurance) was arguably right.
-  This is a small sample, but if your files are mostly German, try `ml`.
-- **Junk looks confident.** A file with no usable content (e.g. a corrupt or text-less PDF) is
-  judged by its name alone and can still get a high score (`scan_0012.pdf` → Books at 0.66–0.98
-  depending on the model). Check files whose details show no content before accepting them.
-- **One level of categories.** A file goes into `Finance/`, never `Finance/Taxes/2025/`.
-- **Limited reading window.** About 300 tokens of the file itself (~1200 characters, see §4). For
-  long documents only the beginning counts.
-- **Confidence with more than 10 folders.** After the tournament, probabilities are computed among
-  the finalists only, so confidence is somewhat less meaningful than with ≤10 folders.
-- **Images are judged by OCR text + filename + EXIF.** There is no visual understanding, so a photo
-  of a receipt without readable text is a guess.
-- **Scanned PDFs without a text layer** are classified by filename only (they are flagged in the
-  metadata); OCR is not run on PDFs.
-- **No learning yet.** Your accepts and overrides are stored but not fed back into the model or the
-  descriptions.
+- **New topics score lower.** The model learns from what you already sorted. A file from a topic you
+  have never sorted goes to the closest known category, usually with a lower confidence (§4a, §4b).
+- **Overlapping categories** cause most of the remaining mistakes (e.g. a phone backup folder that
+  also holds personal photos).
+- **Only the beginning of a document counts.** The query reads up to `max_text_chars` (1500), and the
+  embedding model sees 256 tokens of it.
+- **Files without readable content** are judged by name and type only and can still look confident.
+  The row's details say "No readable content".
+- **Delete is learned poorly.** The trained model leaves it out (§4b); rules work better for it.
+- **Pictures** are compared by what they look like (§4c). Categories defined by meaning rather than
+  looks gain little; HEIC files are not read.
+- **Second opinion** is a hint only (§4h); it never changes confidence or status.
+- **Suggested names** are heuristic (§4e): subjects are often generic, and typed names are not learned yet.
 
 **Workflow**
 - Threshold changes apply to the **next** scan. Existing proposals keep their status.
 - Rescanning the same inbox creates new proposals for the same files, unless you tick "Only new".
 - Renaming or removing a category later breaks accepted proposals that point at it; Apply reports them.
-- The database grows with every scan. There is no cleanup command yet.
+- The database grows with every scan. `classifiles prune` removes undecided proposals of old scans;
+  decisions are kept.
 - Copy + undo removes the copy only if it is unchanged; otherwise it stays and is reported.
-
-**Planned next steps:** SemIf/Qwen backend, learning from your review decisions, suggested
-filenames/notes/links, a vision model for images, named profiles in the UI.
+- Opening files, Explorer and the download source need WSL with `powershell.exe` (Windows).

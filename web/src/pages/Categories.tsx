@@ -4,6 +4,7 @@ import { FolderPicker } from '../components/FolderPicker'
 import { IndexCard } from '../components/IndexCard'
 import { PageHead } from '../components/PageHead'
 import { Icon } from '../components/Icon'
+import { useMessages } from '../messages'
 
 interface Row {
   path: string
@@ -32,13 +33,12 @@ function toRows(p: CategoriesPayload): Row[] {
 
 const words = (s: string) => s.trim().split(/\s+/).filter(Boolean).length
 
-export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: {
+export function CategoriesPage({ data, examplesActive, onSaved }: {
   data: CategoriesPayload
   examplesActive: boolean
   onSaved: (p: CategoriesPayload) => void
-  notify: (m: string) => void
-  fail: (e: unknown) => void
 }) {
+  const { notify, fail } = useMessages()
   const [roots, setRoots] = useState(data.roots)
   const [rows, setRows] = useState<Row[]>(() => toRows(data))
   const [del, setDel] = useState<DeleteSettings>(data.delete)
@@ -123,7 +123,7 @@ export function CategoriesPage({ data, examplesActive, onSaved, notify, fail }: 
         )}
       </section>
 
-      <IndexCard active={examplesActive} notify={notify} fail={fail} />
+      <IndexCard active={examplesActive} />
 
       {grouped.map(([group, items]) => (
         <section key={group} className="cat-section">

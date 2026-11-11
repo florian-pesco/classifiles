@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api, type Quality, type QualitySummary } from '../api'
+import { useMessages } from '../messages'
 
 const VIA_LABEL: Record<string, string> = {
   confirm: 'confirmed', override: 'changed', bulk: 'accepted in bulk', reject: 'kept', unknown: 'before tracking',
@@ -26,7 +27,8 @@ function Line({ label, s }: { label: string; s: QualitySummary }) {
 }
 
 /** How often proposals matched what you actually chose in Review. Aggregates only. */
-export function QualityCard({ fail }: { fail: (e: unknown) => void }) {
+export function QualityCard() {
+  const { fail } = useMessages()
   const [q, setQ] = useState<Quality | null>(null)
   const [checking, setChecking] = useState(false)
   useEffect(() => { api.quality().then(setQ).catch(fail) }, [fail])

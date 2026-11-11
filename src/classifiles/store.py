@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import sqlite3
 import threading
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
@@ -41,7 +42,8 @@ CREATE TABLE IF NOT EXISTS proposals (
     source TEXT NOT NULL,
     alternatives TEXT NOT NULL,         -- JSON
     reason TEXT NOT NULL DEFAULT '',
-    -- suggested (>= threshold) | needs_review | accepted | rejected | moved (= applied: moved, copied or trashed; see moves.action)
+    -- suggested (>= threshold) | needs_review | accepted | rejected
+    -- | moved (= applied: moved, copied or trashed; see moves.action)
     status TEXT NOT NULL,
     final_target TEXT,                  -- what the user accepted (defaults to target)
     decided_via TEXT,                   -- confirm | override | bulk | reject (NULL: undecided or before tracking)
@@ -140,8 +142,9 @@ CREATE TABLE IF NOT EXISTS examples (
 );
 """
 
-# Columns added after the first release: (table, column, definition). Applied to older databases.
-MIGRATIONS = [
+# Columns added before the schema had a version: (table, column, definition). Migration 1 adds the
+# missing ones to older databases. Frozen: later changes are new steps in MIGRATIONS.
+_UNVERSIONED_COLUMNS = [
     ("examples", "qvector", "BLOB"),
     ("proposals", "suggested_name", "TEXT"),
     ("proposals", "new_name", "TEXT"),
@@ -176,6 +179,24 @@ MIGRATIONS = [
     ("proposals", "relearned", "INTEGER NOT NULL DEFAULT 0"),
 ]
 
+
+
+def _add_unversioned_columns(db: sqlite3.Connection) -> None:
+    for table, column, definition in _UNVERSIONED_COLUMNS:
+        existing = {r[1] for r in db.execute(f"PRAGMA table_info({table})")}
+        if column not in existing:
+            db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+
+
+# Schema changes, in order. The database records how many it has run (PRAGMA user_version) and runs
+# each step once. New databases get the full SCHEMA above and run them too, so every step must be safe
+# on an up-to-date schema (IF NOT EXISTS, a column check). Append new steps; never edit or reorder.
+MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
+    _add_unversioned_columns,                                                 # 1
+    "CREATE INDEX IF NOT EXISTS proposals_path ON proposals(path)",           # 2: "Only new", no full scan
+]
+SCHEMA_VERSION = len(MIGRATIONS)
+
 JSON_FIELDS = ("evidence", "alternatives", "neighbours", "name_llm", "name_hints")
 
 
@@ -192,11 +213,22 @@ class Store:
         self._lock = threading.RLock()
         with self._lock:
             self._db.executescript(SCHEMA)
-            for table, column, definition in MIGRATIONS:
-                existing = {r[1] for r in self._db.execute(f"PRAGMA table_info({table})")}
-                if column not in existing:
-                    self._db.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            version = self._db.execute("PRAGMA user_version").fetchone()[0]
+            if version > SCHEMA_VERSION:
+                raise RuntimeError(f"Database {path} is from a newer classifiles (schema {version} > "
+                                   f"{SCHEMA_VERSION}); update classifiles first.")
+            for step in MIGRATIONS[version:]:
+                if callable(step):
+                    step(self._db)
+                else:
+                    self._db.execute(step)
+            self._db.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
             self._db.commit()
+
+    @property
+    def schema_version(self) -> int:
+        with self._lock:
+            return self._db.execute("PRAGMA user_version").fetchone()[0]
 
     def execute(self, sql: str, params: tuple | dict = ()) -> sqlite3.Cursor:
         with self._lock:
@@ -221,7 +253,9 @@ class Store:
         values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS else v for k, v in values.items()}
         cols = ", ".join(values)
         marks = ", ".join(f":{k}" for k in values)
-        return self.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", values).lastrowid
+        row_id = self.execute(f"INSERT INTO {table} ({cols}) VALUES ({marks})", values).lastrowid
+        assert row_id is not None
+        return row_id
 
     def update(self, table: str, id: int, values: dict) -> None:
         values = {k: json.dumps(v, ensure_ascii=False) if k in JSON_FIELDS and v is not None else v

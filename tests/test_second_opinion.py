@@ -2,19 +2,19 @@
 
 import sys
 import textwrap
+from typing import ClassVar
 
 import pytest
 
 from classifiles import llm
 from classifiles.extract.base import Evidence
-from test_examples import ex_service, sorted_tree  # noqa: F401
 
 
 class FakeClient:
     """Stands in for LLMClient. `pick` is the category name it prefers (by content), or None to
     always answer 'A' (a model with pure letter bias)."""
 
-    instances: list = []
+    instances: ClassVar[list] = []
     pick: str | None = None
     fail_after: int | None = None
 
@@ -95,7 +95,7 @@ def test_rotation_cancels_letter_bias(so_service, sorted_tree):
 
 def test_gating(so_service, sorted_tree):
     so_service.settings.llm_max_files = 1
-    scan_id, rows = so_service.scan(sorted_tree["inbox"])
+    _scan_id, rows = so_service.scan(sorted_tree["inbox"])
     asked = [r for r in rows if r["llm_choice"]]
     assert len(asked) == 1
     assert all(r["source"] == "examples" for r in asked)          # never rule hits
@@ -115,7 +115,7 @@ def test_prompt_contents(so_service, sorted_tree):
 
 def test_model_failure_keeps_the_scan(so_service, sorted_tree):
     FakeClient.fail_after = 1
-    scan_id, rows = so_service.scan(sorted_tree["inbox"])
+    scan_id, _rows = so_service.scan(sorted_tree["inbox"])
     scan = so_service.get_scan(scan_id)
     assert scan["status"] == "done" and "model crashed" in scan["llm_error"]
 
@@ -141,7 +141,8 @@ def test_combine_and_helpers():
     assert llm.has_evidence(ev)
     nb = [{"category": "Studies", "dir": "V/Econ 1", "file": "a.pdf", "weight": 1},
           {"category": "Work", "dir": "", "file": "b.docx", "weight": .5}]
-    assert llm.examples_for(nb, "Studies") == ["Studies/V/Econ 1/a.pdf"] and llm.examples_for(nb, "Work") == ["Work/b.docx"]
+    assert llm.examples_for(nb, "Studies") == ["Studies/V/Econ 1/a.pdf"]
+    assert llm.examples_for(nb, "Work") == ["Work/b.docx"]
 
 
 def test_client_protocol_with_a_fake_worker():
@@ -152,7 +153,8 @@ def test_client_protocol_with_a_fake_worker():
             req = json.loads(line)
             if req.get("task") == "shutdown":
                 break
-            print(json.dumps({"id": req["id"], "probs": {o: 1 / len(req["options"]) for o in req["options"]}}), flush=True)
+            probs = {o: 1 / len(req["options"]) for o in req["options"]}
+            print(json.dumps({"id": req["id"], "probs": probs}), flush=True)
     """)
     with llm.LLMClient("fake", cmd=[sys.executable, "-c", worker]) as client:
         assert client.choose("q", ["A", "B"]) == {"A": 0.5, "B": 0.5}
