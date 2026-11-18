@@ -3,14 +3,16 @@ import { api, type CategoriesPayload, type Settings } from './api'
 import { Icon, type IconName } from './components/Icon'
 import { MessagesContext } from './messages'
 import { CategoriesPage } from './pages/Categories'
+import { DuplicatesPage } from './pages/Duplicates'
 import { HistoryPage } from './pages/History'
 import { ReviewPage } from './pages/Review'
 import { RulesPage } from './pages/Rules'
 import { SettingsPage } from './pages/Settings'
 
-type Page = 'review' | 'categories' | 'rules' | 'history' | 'settings'
+type Page = 'review' | 'duplicates' | 'categories' | 'rules' | 'history' | 'settings'
 const PAGES: { key: Page; label: string; icon: IconName }[] = [
   { key: 'review', label: 'Review', icon: 'inbox' },
+  { key: 'duplicates', label: 'Duplicates', icon: 'copy' },
   { key: 'categories', label: 'Categories', icon: 'layers' },
   { key: 'rules', label: 'Rules', icon: 'rules' },
   { key: 'history', label: 'History & trash', icon: 'history' },
@@ -144,6 +146,7 @@ export default function App() {
                 {page === 'review' && (
                   <ReviewPage settings={settings} categories={cats.categories} scanId={scanId} setScanId={setScanId} />
                 )}
+                {page === 'duplicates' && <DuplicatesPage roots={cats.roots.map(r => r.path)} />}
                 {page === 'categories' && <CategoriesPage data={cats} examplesActive={settings.backend === 'examples'} onSaved={setCats} />}
                 {page === 'rules' && <RulesPage categories={cats.categories} />}
                 {page === 'history' && (

@@ -269,6 +269,57 @@ export interface UndoResult {
 export interface EmptyTrashResult { purged: number; errors: { move_id: number; error: string }[] }
 export interface Ok { ok: boolean }
 
+/** One file of a set of identical files (Duplicates page). `fit`: how well its folder fits (null: not in the index). */
+export interface DuplicateCopy {
+  id: number
+  category: string
+  relpath: string
+  label: string
+  folder: string
+  mtime: number
+  fit: number | null
+}
+
+export interface DuplicateGroup {
+  hash: string
+  size: number
+  wasted: number
+  spread: 'folder' | 'category' | 'categories'
+  keep: number | null
+  reason: string
+  clear: boolean
+  copies: DuplicateCopy[]
+}
+
+export interface FolderPair {
+  a: string; b: string; a_label: string; b_label: string
+  a_files: number; b_files: number; files: number; bytes: number
+}
+
+export interface DuplicateSearch {
+  state: 'idle' | 'running' | 'done' | 'cancelled' | 'failed'
+  root?: string | null
+  phase?: 'listing' | 'comparing' | 'verifying'
+  message?: string | null
+  done?: number
+  total?: number
+  bytes_done?: number
+  bytes_total?: number
+  eta_seconds?: number | null
+  finished_at?: string
+  groups?: number
+  error?: string
+}
+
+export interface DuplicateOverview {
+  status: DuplicateSearch
+  summary: { groups: number; copies: number; bytes: number; clear: number; ignored: number }
+  groups: DuplicateGroup[]
+  pairs: FolderPair[]
+}
+
+export interface TrashResult { batch_id: string | null; trashed: number; bytes: number; errors: { hash: string; error: string }[] }
+
 /** A failed request: `message` is the server's explanation (FastAPI `detail`), `status` the HTTP status. */
 export class ApiError extends Error {
   readonly status: number
@@ -348,6 +399,18 @@ export const api = {
   moves: () => call<Move[]>('GET', '/api/moves'),
   undo: (batchId?: string) => call<UndoResult>('POST', `/api/undo?${q({ batch_id: batchId })}`),
   trash: () => call<TrashItem[]>('GET', '/api/trash'),
+  duplicates: (root?: string) => call<DuplicateOverview>('GET', `/api/duplicates?${q({ root })}`),
+  ignoredDuplicates: (root?: string) => call<DuplicateGroup[]>('GET', `/api/duplicates/ignored?${q({ root })}`),
+  duplicateSearch: () => call<DuplicateSearch>('GET', '/api/duplicates/search'),
+  searchDuplicates: (root?: string) => call<DuplicateSearch>('POST', '/api/duplicates/search', { root }),
+  cancelDuplicateSearch: () => call<DuplicateSearch>('POST', '/api/duplicates/search/cancel'),
+  resolveDuplicates: (decisions: { hash: string; keep: number[] }[], root?: string) =>
+    call<TrashResult>('POST', '/api/duplicates/resolve', { decisions, root }),
+  resolveSuggested: (root?: string) => call<TrashResult>('POST', '/api/duplicates/resolve-suggested', { root }),
+  resolveFolders: (keepFolder: string, dropFolder: string, root?: string) =>
+    call<TrashResult>('POST', '/api/duplicates/resolve-folders', { keep_folder: keepFolder, drop_folder: dropFolder, root }),
+  ignoreDuplicates: (hashes: string[], ignored = true) => call<Ok>('POST', '/api/duplicates/ignore', { hashes, ignored }),
+  openCopy: (id: number, reveal = false) => call<Ok>('POST', `/api/duplicates/${id}/open?${q({ reveal })}`),
   emptyTrash: () => call<EmptyTrashResult>('POST', '/api/trash/empty'),
 }
 

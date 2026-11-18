@@ -7,7 +7,8 @@ Nothing changes on disk until you apply it, and everything can be undone.
 
 In the web UI, similar files are suggested as batches to review together, every decision you make is
 used right away for the other files of the same scan, and files get a cleaner name suggested
-(documents `Subject_Type_Detail`, photos and videos a short title).
+(documents `Subject_Type_Detail`, photos and videos a short title). The Duplicates page finds identical
+files inside your sorted folders and keeps one copy in its right place.
 
 ```
 inbox file ─► extract (name, type, metadata, text/OCR snippet)

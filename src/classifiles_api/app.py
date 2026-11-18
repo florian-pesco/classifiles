@@ -12,7 +12,7 @@ from fastapi.staticfiles import StaticFiles
 
 from classifiles import ClassifilesService, Settings
 
-from .routes import categories, history, index, scans, settings
+from .routes import categories, duplicates, history, index, scans, settings
 
 WEB_DIST = Path(__file__).resolve().parents[2] / "web" / "dist"
 
@@ -23,7 +23,7 @@ def create_app(service: ClassifilesService | None = None, config_path: str | Non
     app = FastAPI(title="classifiles")
     app.state.service = svc
     app.state.config_path = config_path
-    for module in (settings, categories, index, scans, history):
+    for module in (settings, categories, index, scans, history, duplicates):
         app.include_router(module.router)
 
     if WEB_DIST.is_dir():

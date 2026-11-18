@@ -8,6 +8,7 @@ import './styles/layout.css'
 import './styles/review.css'
 import './styles/dialogs.css'
 import './styles/pages.css'
+import './styles/duplicates.css'
 import './styles/responsive.css'
 import App from './App.tsx'
 

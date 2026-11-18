@@ -124,7 +124,7 @@ export function HistoryPage({ openScan }: {
         {tab === 'trash' && (
           <>
             <p className="muted small">
-              Deleted files wait in a hidden <code>.classifiles-trash</code> folder in their inbox until you empty the trash;
+              Deleted files wait in a hidden <code>.classifiles-trash</code> folder next to them until you empty the trash;
               until then Undo brings them back.
             </p>
             <ShowMore items={trash.slice(0, 500)} limit={8} empty={<p className="muted small">The trash is empty.</p>}

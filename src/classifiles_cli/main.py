@@ -195,6 +195,54 @@ def prune(
 
 
 @app.command()
+def duplicates(
+    root: str | None = typer.Option(None, "--root", help="A configured root (default: every category folder)"),
+    keep_suggested: bool = typer.Option(False, "--keep-suggested",
+                                        help="Keep the suggested copy where it is clear; trash the others"),
+    show: int = typer.Option(10, "--show", min=0, help="How many of the largest groups to list"),
+    yes: bool = typer.Option(False, "--yes", "-y", help="Don't ask for confirmation"),
+    config: Path | None = ConfigOpt,
+):
+    """Find identical files in your sorted folders (low priority; Ctrl+C cancels). Trashed copies can be undone."""
+    import threading
+    import time
+
+    svc = _service(config)
+    t = threading.Thread(target=svc.search_duplicates, args=(root,), daemon=True)
+    t.start()
+    try:
+        with Progress(console=console, transient=True) as progress:
+            task = progress.add_task("listing files…", total=None)
+            while t.is_alive():
+                st = svc.duplicate_search_status()
+                progress.update(task, description=st.get("message") or st.get("phase", ""),
+                                completed=st.get("done", 0), total=st.get("total") or None)
+                time.sleep(0.5)
+    except KeyboardInterrupt:
+        svc.cancel_duplicate_search()
+        console.print("Cancelling…")
+        t.join()
+    st = svc.duplicate_search_status()
+    if st["state"] != "done":
+        console.print(f"Search {st['state']}." + (f" Error: {st['error']}" if st.get("error") else ""))
+        raise typer.Exit(1)
+    groups = svc.duplicate_groups(root)
+    clear = [g for g in groups if g.clear]
+    console.print(f"{len(groups)} sets of identical files, {sum(len(g.copies) - 1 for g in groups)} extra copies, "
+                  f"{sum(g.wasted for g in groups) / 1e6:.1f} MB. Clear suggestions: {len(clear)}.")
+    for g in groups[:show]:
+        console.print(f"[bold]{g.size / 1e6:.1f} MB × {len(g.copies)}[/] {g.reason}")
+        for c in g.copies:
+            console.print(f"  {'[green]keep[/]' if c.id == g.keep else '    '} {c.label}")
+    if keep_suggested and clear:
+        size = sum(g.wasted for g in clear) / 1e6
+        if yes or typer.confirm(f"Trash {sum(len(g.copies) - 1 for g in clear)} copies ({size:.1f} MB)?"):
+            r = svc.resolve_suggested_duplicates(root)
+            console.print(f"Trashed {r['trashed']} copies (undo: classifiles undo {r['batch_id']}); "
+                          f"{len(r['errors'])} skipped.")
+
+
+@app.command()
 def index(
     learn_past: bool = typer.Option(False, "--learn-past",
                                     help="Only learn applied files that are not learned yet (no folder scan)"),

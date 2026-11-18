@@ -164,6 +164,10 @@ class ApplyingMixin(ServiceBase):
             if m["proposal_id"]:
                 self.store.update("proposals", m["proposal_id"], {"status": "accepted", "updated_at": now()})
             restored.append({"move_id": m["id"], "path": m["src"]})
+            if _sorted_copy_trashed(m):  # Duplicates page: back into the catalog, nothing was learned
+                self._catalog.add(m["category_key"], Path(m["src"]).relative_to(m["category_key"]).as_posix(),
+                                  Path(m["src"]))
+                continue
             forget.append(_learned_key(m["dst"], m["action"], m["category_key"]))
             if m["action"] != "delete":
                 self._catalog.remove(*forget[-1])
@@ -195,3 +199,9 @@ class ApplyingMixin(ServiceBase):
             self.store.update("moves", r["id"], {"purged_at": now()})
             purged += 1
         return {"purged": purged, "errors": errors}
+
+
+def _sorted_copy_trashed(m: dict) -> bool:
+    """A duplicate trashed from a sorted folder on the Duplicates page: its move keeps the category it
+    was in (inbox files sent to Delete have the Delete key)."""
+    return m["action"] == "delete" and m["proposal_id"] is None and m["category_key"] not in (None, DELETE_KEY)

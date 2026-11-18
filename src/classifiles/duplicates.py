@@ -18,6 +18,7 @@ import os
 import re
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -109,16 +110,7 @@ class Catalog:
         self.status = {"state": "running", "message": "listing files for duplicate detection", "done": 0,
                        "started_at": now()}
         try:
-            cats = [c for c in categories if c.usable and c.path is not None]
-            keys = set()
-            for i, c in enumerate(cats, 1):
-                if self._cancel.is_set():
-                    break
-                assert c.path is not None
-                key = str(c.path)
-                keys.add(key)
-                self.status = {**self.status, "message": f"listing {c.name} ({i}/{len(cats)})"}
-                self._catalog_category(key, c.path)
+            keys = self.refresh(categories)
             if not self._cancel.is_set():  # categories that are gone or disabled
                 stale = [r["category_key"] for r in self.store.query("SELECT DISTINCT category_key FROM catalog")
                          if r["category_key"] not in keys]
@@ -131,12 +123,32 @@ class Catalog:
             self.status = {**self.status, "state": "failed", "error": str(e)[:500]}
         return self.status
 
-    def _catalog_category(self, key: str, root: Path) -> None:
+    def refresh(self, categories: list[Category], progress: Callable[[str], None] | None = None,
+                cancel: threading.Event | None = None) -> set[str]:
+        """List the files of these categories again (incremental), leaving other categories alone.
+        Returns their keys. Stops early when cancelled (`cancel`, default: the catalog's own)."""
+        cancel = cancel or self._cancel
+        cats = [c for c in categories if c.usable and c.path is not None]
+        keys = set()
+        for i, c in enumerate(cats, 1):
+            if cancel.is_set():
+                break
+            assert c.path is not None
+            keys.add(str(c.path))
+            message = f"listing {c.name} ({i}/{len(cats)})"
+            if progress:
+                progress(message)
+            else:
+                self.status = {**self.status, "message": message}
+            self._catalog_category(str(c.path), c.path, cancel)
+        return keys
+
+    def _catalog_category(self, key: str, root: Path, cancel: threading.Event) -> None:
         existing = {r["relpath"]: r for r in self.store.query(
             "SELECT id, relpath, size, mtime FROM catalog WHERE category_key = ?", (key,))}
         seen, upserts = set(), []
         for dirpath, dirnames, filenames in os.walk(root, onerror=lambda e: None):
-            if self._cancel.is_set():
+            if cancel.is_set():
                 return
             dirnames[:] = [d for d in dirnames if not d.startswith(".") and d.lower() not in SKIP_DIRS]
             for name in filenames:
