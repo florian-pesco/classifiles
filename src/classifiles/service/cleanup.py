@@ -200,6 +200,7 @@ class CleanupMixin(ServiceBase):
         self.store.insert("moves", {"batch_id": batch_id, "proposal_id": None, "src": str(m.src), "dst": str(m.dst),
                                     "action": "delete", "category_key": c.key, "moved_at": now()})
         self._catalog.remove(c.key, c.relpath)
+        self._search_track(m.src, m.dst)
         return None
 
 

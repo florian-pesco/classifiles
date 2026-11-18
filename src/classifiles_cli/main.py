@@ -243,6 +243,45 @@ def duplicates(
 
 
 @app.command()
+def search(
+    text: str = typer.Argument("", help="Words in the name, folder or content (prefixes work: 'rechn')"),
+    type_: list[str] = typer.Option([], "--type", "-t", help="documents, pictures, videos, audio, archives, "
+                                                             "installers, code, other (repeatable)"),
+    ext: str = typer.Option("", "--ext", help="Only this extension, e.g. pdf"),
+    days: int | None = typer.Option(None, "--days", min=1, help="Only files changed in the last N days"),
+    match: str = typer.Option("all", "--match", help="all, name or content"),
+    sort: str = typer.Option("relevance", "--sort", help="relevance, newest, oldest, largest, name"),
+    limit: int = typer.Option(30, "--limit", min=1, max=1000),
+    update: bool = typer.Option(False, "--update", help="Update the search index first (low priority)"),
+    config: Path | None = ConfigOpt,
+):
+    """Find files in your roots, manual folders and inboxes."""
+    import time
+
+    from classifiles.search import HIT_END, HIT_START
+
+    svc = _service(config)
+    if update or not svc.search_status()["files"]:
+        with console.status("Updating the search index…"):
+            st = svc.update_search_index()
+        console.print(f"Search index {st['state']}: {st.get('files', 0)} files, "
+                      f"text of {st.get('texts', 0)} documents.")
+    after = time.time() - days * 86400 if days else None
+    r = svc.search({"text": text, "groups": type_, "ext": ext, "after": after, "match": match, "sort": sort,
+                    "limit": limit})
+    t = Table("modified", "size", "file", "found in")
+    for x in r["results"]:
+        where = " + ".join(w for w, on in (("name", x["in_name"]), ("folder", x["in_folder"]),
+                                           ("content", x["in_content"])) if on)
+        snippet = (x["snippet"] or "").replace(HIT_START, "[bold]").replace(HIT_END, "[/]")
+        shown = x["path"] + (f"\n[dim]{snippet}[/]" if snippet else "")
+        t.add_row(x["modified"][:10], f"{x['size'] / 1e6:.1f} MB", shown, where)
+    console.print(t)
+    files = f"{r['total']} file{'' if r['total'] == 1 else 's'}"
+    console.print(f"{'more than ' if r['more'] else ''}{files}, {r['took_ms']} ms.")
+
+
+@app.command()
 def index(
     learn_past: bool = typer.Option(False, "--learn-past",
                                     help="Only learn applied files that are not learned yet (no folder scan)"),
