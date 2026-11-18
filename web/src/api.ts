@@ -149,6 +149,7 @@ export interface Settings {
   images_per_category: number
   detect_duplicates: boolean
   duplicates_in_sorted: boolean
+  search_content: boolean
   llm_model: string
   llm_max_files: number
   relearn_in_scan: boolean
@@ -320,6 +321,54 @@ export interface DuplicateOverview {
 
 export interface TrashResult { batch_id: string | null; trashed: number; bytes: number; errors: { hash: string; error: string }[] }
 
+export type SearchGroup = 'documents' | 'pictures' | 'videos' | 'audio' | 'archives' | 'installers' | 'code' | 'other'
+
+export interface SearchRequest {
+  text: string
+  groups: SearchGroup[]
+  ext: string
+  after: number | null
+  before: number | null
+  location: string | null
+  match: 'all' | 'name' | 'content'
+  sort: 'relevance' | 'newest' | 'oldest' | 'largest' | 'name'
+  limit: number
+}
+
+/** One search hit. `snippet`: content around the match, matched words between \u0002 and \u0003. */
+export interface SearchResult {
+  id: number
+  name: string
+  folder: string
+  path: string
+  location: string
+  kind: string
+  ext: string
+  size: number
+  modified: string
+  in_name: boolean
+  in_folder: boolean
+  in_content: boolean
+  snippet: string | null
+}
+
+export interface SearchResponse { total: number; more: boolean; results: SearchResult[]; took_ms: number }
+
+export interface SearchStatus {
+  state: 'idle' | 'running' | 'done' | 'cancelled' | 'failed'
+  phase?: 'listing' | 'reading'
+  message?: string | null
+  done?: number
+  total?: number
+  eta_seconds?: number | null
+  finished_at?: string
+  error?: string
+  files: number
+  texts: number
+  locations: string[]
+  content: boolean
+}
+
 /** A failed request: `message` is the server's explanation (FastAPI `detail`), `status` the HTTP status. */
 export class ApiError extends Error {
   readonly status: number
@@ -411,6 +460,11 @@ export const api = {
     call<TrashResult>('POST', '/api/duplicates/resolve-folders', { keep_folder: keepFolder, drop_folder: dropFolder, root }),
   ignoreDuplicates: (hashes: string[], ignored = true) => call<Ok>('POST', '/api/duplicates/ignore', { hashes, ignored }),
   openCopy: (id: number, reveal = false) => call<Ok>('POST', `/api/duplicates/${id}/open?${q({ reveal })}`),
+  search: (req: SearchRequest) => call<SearchResponse>('POST', '/api/search', req),
+  searchStatus: () => call<SearchStatus>('GET', '/api/search/index'),
+  updateSearch: () => call<SearchStatus>('POST', '/api/search/index/update'),
+  cancelSearchUpdate: () => call<SearchStatus>('POST', '/api/search/index/cancel'),
+  openResult: (id: number, reveal = false) => call<Ok>('POST', `/api/search/${id}/open?${q({ reveal })}`),
   emptyTrash: () => call<EmptyTrashResult>('POST', '/api/trash/empty'),
 }
 

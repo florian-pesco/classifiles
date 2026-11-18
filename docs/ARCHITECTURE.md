@@ -477,6 +477,25 @@ class Decider(Protocol):
 - Planned: a SemIf-style backend (reads answer-token logits of Qwen3.5-4B, ~8–9 GB VRAM). It is
   stronger but slower. Adding it means one new file in `deciders/` plus one line in `make_decider()`.
 
+### 4j. Search (`search.py`, `service/search.py`)
+
+Not a model: a local index for the Search page, over every root, manual category folder and inbox
+(`searched_locations`: a folder inside another is searched once).
+- **`search_files`**: every file (hidden and tool folders skipped) with a normalised name and folder
+  (`normalize`: lower case, no accents, `_ - .` as spaces), kind, size and mtime. Name search is a
+  substring match on it, every word must appear in the name or folder.
+- **`search_text`**: an FTS5 index (`unicode61`, accents removed) of the first 20,000 characters of
+  documents (PDF text layer, Office, text; never OCR; ≤ 50 MB). Words match by prefix; BM25 ranks
+  them, `snippet()` shows where. The setting `search_content` switches it off (and drops the text).
+- **Ranking:** every word in the file name first, then content matches (BM25), then folder-only
+  matches. Each part is capped at 5,000 hits ("more than"). Filters: kind groups (`GROUPS`),
+  extension, modified range, size, location.
+- **Updates** run in the background (low priority, cancellable): list again (unchanged size/mtime
+  skipped, missing files dropped), then read the text of new or changed documents, newest first. An
+  unreachable location keeps its entries. The page starts an update when it opens and the index is
+  older than 6 hours. Apply, undo and the Duplicates page move entries right away (`track`).
+- **Speed** (100,000 files, 4,000 documents): typical queries 30–170 ms, a one-letter query under 1 s.
+
 ## 5. Proposal lifecycle (status machine)
 
 ```
@@ -535,6 +554,8 @@ One SQLite file. The main tables:
 | `image_examples` | sorted picture (vector) | category_key, relpath, mtime, model, vector (§4c) |
 | `catalog` | file in a folder category | size, mtime, quick and full hash, for duplicates (§4g) |
 | `duplicate_ignored` | set of identical files kept as is | full hash (Duplicates page, §4g) |
+| `search_files` | file in a searched location | location, relpath, normalised name and folder, ext, kind, size, mtime, text_mtime (§4j) |
+| `search_text` | document with text (FTS5) | rowid = `search_files.id`, text (§4j) |
 | `classifiers` | trained model | embedding model, category keys, coefficients, C, temperature (§4b) |
 | `label_features` | picture label set | cached text vectors of the label prompts, logit scale and bias (§4e) |
 
@@ -565,6 +586,7 @@ src/classifiles/
     learning.py          index builds (text, pictures, catalog), learning from applied files, retraining
     llm_steps.py         the language-model step of a scan (second opinion, name choice)
     cleanup.py           Duplicates page: search, groups, keep one copy, folder pairs, keep as is
+    search.py            Search page: locations, index updates, queries, tracking moves
     helpers.py           skip lists, vector helpers; base.py declares the shared attributes for mypy
   taxonomy.py          build_categories(): roots' subfolders + manual entries + Delete; option_text()
   extract/             one extractor per family (pdf, office, text, image, archive, video) + ocr.py;
@@ -581,6 +603,7 @@ src/classifiles/
   batches.py           batch suggestions for Review
   duplicates.py        exact duplicates: catalog of the sorted folders, inbox check
   cleanup.py           duplicates inside the sorted folders: search, groups, which copy to keep
+  search.py            search index (file list + document text, FTS5) and queries
   llm.py, llm_worker.py  local language model in its own process (second opinion, name choice)
   source.py            download source (Windows Zone.Identifier → domain)
   hf.py                load models from the Hugging Face cache: download once, then offline
@@ -592,7 +615,7 @@ src/classifiles_api/
   app.py               create_app(): includes the routers, serves web/dist
   routes/              one router per area: settings · categories (+ rules, folder picker) · index ·
                          scans (+ proposals, preview, open) · history (apply, quality, undo, trash) ·
-                         duplicates (Duplicates page)
+                         duplicates (Duplicates page) · search (Search page)
   models.py, deps.py   request bodies; service dependency, error mapping (guard), path stripping
   windows.py           open a file in Windows, list drives
 src/classifiles_cli/main.py  `classifiles` command (typer)
@@ -671,6 +694,10 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | POST | `/duplicates/resolve-folders` `{keep_folder, drop_folder, root?}` | keep one folder's copies, trash the other's |
 | POST | `/duplicates/ignore` `{hashes, ignored?}` | keep groups as they are / show them again |
 | POST | `/duplicates/{id}/open?reveal=` | open a copy in Windows / show it in Explorer |
+| POST | `/search` `{text, groups, ext, after, before, min_size, max_size, location, match, sort, limit}` | search: `total`, `more`, `results` (with snippet), `took_ms` |
+| GET | `/search/index` | search index: status, file and document counts, locations |
+| POST | `/search/index/update`, `/search/index/cancel` | update the search index (background) / stop |
+| POST | `/search/{id}/open?reveal=` | open a result in Windows / show it in Explorer |
 
 ## 10. Limitations
 

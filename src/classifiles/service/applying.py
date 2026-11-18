@@ -113,6 +113,7 @@ class ApplyingMixin(ServiceBase):
                                         "created_dir": str(m.created_dir) if m.created_dir else None,
                                         "moved_at": now()})
             self.store.update("proposals", p["id"], {"status": "moved", "updated_at": now()})
+            self._search_track(None if m.action == "copy" else m.src, m.dst)
             moved.append({"proposal_id": p["id"], "src": str(m.src), "dst": str(m.dst), "action": m.action,
                           "created_dir": str(m.created_dir) if m.created_dir else None})
             key, rel = _learned_key(str(m.dst), m.action, cat_key)
@@ -161,6 +162,7 @@ class ApplyingMixin(ServiceBase):
                 errors.append({"move_id": m["id"], "error": str(e)})
                 continue
             self.store.update("moves", m["id"], {"undone_at": now()})
+            self._search_track(m["dst"], None if m["action"] == "copy" else m["src"])
             if m["proposal_id"]:
                 self.store.update("proposals", m["proposal_id"], {"status": "accepted", "updated_at": now()})
             restored.append({"move_id": m["id"], "path": m["src"]})

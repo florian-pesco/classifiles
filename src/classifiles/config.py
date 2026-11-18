@@ -101,6 +101,8 @@ class Settings:
     # is built with "Update index".
     detect_duplicates: bool = True
     duplicates_in_sorted: bool = True
+    # Search page: also read the text of documents (PDF, Office, text), so they can be found by content.
+    search_content: bool = True
     # Second opinion from a local language model for unsure files (examples backend only). It is a
     # hint for reviewing ("both agree" / "suggests X"); it never changes confidence or status.
     second_opinion: bool = False

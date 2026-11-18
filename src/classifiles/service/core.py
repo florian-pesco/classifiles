@@ -16,6 +16,7 @@ from ..duplicates import Catalog
 from ..examples import ExampleIndex
 from ..image_index import ImageIndex
 from ..rules import load_rules
+from ..search import SearchIndex
 from ..store import Store
 from ..taxonomy import Category
 from .applying import ApplyingMixin
@@ -26,10 +27,11 @@ from .llm_steps import LlmStepsMixin
 from .names import NamesMixin
 from .reviewing import ReviewingMixin
 from .scanning import ScanningMixin
+from .search import SearchMixin
 
 
 class ClassifilesService(CategoriesMixin, ScanningMixin, ReviewingMixin, NamesMixin, ApplyingMixin, LearningMixin,
-                         LlmStepsMixin, CleanupMixin):
+                         LlmStepsMixin, CleanupMixin, SearchMixin):
     def __init__(self, settings: Settings | None = None, decider: Decider | None = None, store: Store | None = None):
         self.settings = settings or Settings.load()
         self._decider = decider
@@ -50,6 +52,7 @@ class ClassifilesService(CategoriesMixin, ScanningMixin, ReviewingMixin, NamesMi
         self._places = None
         self._cleanup_status: dict = {"state": "idle"}  # Duplicates page: the last search
         self._cleanup_cancel = threading.Event()
+        self._search = SearchIndex(self.store)
 
     def decider(self) -> Decider:
         if self._decider is None:

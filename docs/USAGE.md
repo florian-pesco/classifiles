@@ -183,6 +183,24 @@ for one root or for all categories, so each file ends up once, in its right plac
 
 Everything goes to the trash as one batch per action: **History & trash → Undo** restores it.
 
+### Searching your files
+
+The **Search** page finds files in all roots, manual folders and inboxes, faster than Windows search.
+
+- **Type** in the box (or press `/`): words match file names, folders and, for documents (PDF, Office,
+  text), their content. Case, accents and `_ - .` don't matter, and the beginning of a word is
+  enough: `rechn telekom` finds `Rechnung_Telekom_Oktober.pdf` or a document that mentions both.
+- **Filters:** type (documents, pictures, videos, …), *Modified* (today, past 7 days, this year,
+  between two dates, …), where, extension, and whether to match names, content or both.
+  Without words the page lists the most recently changed files that pass the filters.
+- **Results** show where the words were found, with the matching passage for content. Open the file,
+  show it in Explorer, or copy its Windows path.
+- **The index** is built in the background at low priority, the first time when you open the page
+  (a few minutes for tens of thousands of files, plus reading the documents). It updates again when you
+  open the page and it is older than 6 hours, or with **Update now**. Files moved by classifiles are
+  updated right away. Pictures and scans are found by name, date and type, not by their content (no
+  OCR). Untick *Search inside documents* to keep only names.
+
 ---
 
 ## 6. Settings page
@@ -276,6 +294,7 @@ uv run classifiles apply
 uv run classifiles undo
 uv run classifiles prune --older-than 90      # remove undecided proposals of old scans (asks first)
 uv run classifiles duplicates --root /mnt/d/Archive          # find identical files in the sorted folders
+uv run classifiles search rechnung --type documents --days 90   # find files (--update refreshes the index first)
 uv run classifiles duplicates --keep-suggested    # ...and trash the extra copies where the choice is clear (asks first)
 ```
 

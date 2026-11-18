@@ -12,6 +12,7 @@ if TYPE_CHECKING:
     from ..duplicates import Catalog
     from ..examples import ExampleIndex
     from ..image_index import ImageIndex
+    from ..search import SearchIndex
     from ..store import Store
     from ..taxonomy import Category
 
@@ -27,6 +28,7 @@ class ServiceBase:
     _llm_cancel: threading.Event
     _cleanup_status: dict
     _cleanup_cancel: threading.Event
+    _search: SearchIndex
     _trained: tuple[str, Any] | None
     _trained_status: dict
     _train_lock: threading.Lock

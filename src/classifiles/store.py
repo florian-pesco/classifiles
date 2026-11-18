@@ -197,6 +197,21 @@ MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
     # 3: Duplicates page: groups of identical files the user chose to keep as they are
     "CREATE TABLE IF NOT EXISTS duplicate_ignored (full_hash TEXT PRIMARY KEY, created_at TEXT NOT NULL)",
     "CREATE INDEX IF NOT EXISTS catalog_full_hash ON catalog(full_hash)",     # 4: duplicate groups by hash
+    # 5-7: Search page (search.py): every file in roots, manual folders and inboxes, plus document text
+    """CREATE TABLE IF NOT EXISTS search_files (
+        id INTEGER PRIMARY KEY,
+        location TEXT NOT NULL,             -- the searched folder it was found in
+        relpath TEXT NOT NULL,
+        name_norm TEXT NOT NULL,            -- lower case, no accents, separators as spaces
+        folder_norm TEXT NOT NULL,          -- the same for the folder path
+        ext TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        size INTEGER NOT NULL,
+        mtime REAL NOT NULL,
+        text_mtime REAL,                    -- mtime when the text was read (NULL: not read)
+        UNIQUE (location, relpath))""",
+    "CREATE INDEX IF NOT EXISTS search_files_mtime ON search_files(mtime)",
+    "CREATE VIRTUAL TABLE IF NOT EXISTS search_text USING fts5(text, tokenize = 'unicode61 remove_diacritics 2')",
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 
