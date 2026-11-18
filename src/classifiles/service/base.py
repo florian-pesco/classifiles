@@ -25,6 +25,8 @@ class ServiceBase:
     _image_index: ImageIndex | None
     _catalog: Catalog
     _llm_cancel: threading.Event
+    _cleanup_status: dict
+    _cleanup_cancel: threading.Event
     _trained: tuple[str, Any] | None
     _trained_status: dict
     _train_lock: threading.Lock

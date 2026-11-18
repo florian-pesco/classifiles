@@ -20,6 +20,7 @@ from ..store import Store
 from ..taxonomy import Category
 from .applying import ApplyingMixin
 from .categories import CategoriesMixin
+from .cleanup import CleanupMixin
 from .learning import LearningMixin
 from .llm_steps import LlmStepsMixin
 from .names import NamesMixin
@@ -28,7 +29,7 @@ from .scanning import ScanningMixin
 
 
 class ClassifilesService(CategoriesMixin, ScanningMixin, ReviewingMixin, NamesMixin, ApplyingMixin, LearningMixin,
-                         LlmStepsMixin):
+                         LlmStepsMixin, CleanupMixin):
     def __init__(self, settings: Settings | None = None, decider: Decider | None = None, store: Store | None = None):
         self.settings = settings or Settings.load()
         self._decider = decider
@@ -47,6 +48,8 @@ class ClassifilesService(CategoriesMixin, ScanningMixin, ReviewingMixin, NamesMi
         self.retrain_delay = 30.0  # seconds after an apply/undo before retraining (debounced)
         self._labeller = None
         self._places = None
+        self._cleanup_status: dict = {"state": "idle"}  # Duplicates page: the last search
+        self._cleanup_cancel = threading.Event()
 
     def decider(self) -> Decider:
         if self._decider is None:

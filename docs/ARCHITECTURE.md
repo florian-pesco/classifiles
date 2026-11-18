@@ -396,6 +396,23 @@ Mixed into the neighbour vote (4a) with `trained_weight` (default 0.5, 0 = off).
   request for the Compare view; `GET /api/proposals/{id}/file?duplicate=true` serves the kept copy for
   preview. `_plan()` re-checks right before a duplicate is trashed and refuses ("Not deleted: …") if
   the kept copy is gone or no longer identical.
+- **Duplicates page** (`cleanup.py`, `service/cleanup.py`): every set of identical files *inside* the
+  sorted folders of one root (or of all categories).
+  - *Search* (background, low priority, cancellable): `Catalog.refresh` lists the root's categories
+    again, then `hash_candidates` computes the missing quick hashes of files whose size occurs more
+    than once, and full hashes only where quick hashes match. Hashes are cached in `catalog`, so a
+    second search reads only new or changed files. Progress reports files, bytes and the time left.
+  - *Groups* come straight from the catalog (same full hash, `find_groups`), so they survive restarts.
+  - *Which copy to keep* (`suggest`): names with a copy marker lose; then the copy whose place fits
+    best (`place_scores`: the stored inbox-style vectors of the copies ask the example index for
+    their nearest *other* sorted files, which vote for categories and folders; no model is loaded);
+    then the oldest, then the shortest path. *Clear* means the marker or a fit margin ≥ 0.25 decided.
+  - *Folder pairs* (`folder_pairs`): folders that share identical files, to decide a duplicated
+    folder (e.g. an old backup) once.
+  - *Deciding*: the other copies move to `.classifiles-trash` next to them, in one journaled batch.
+    Right before, the kept copy and each copy are checked (exist; same size and time as hashed, or
+    the same full hash now). The move keeps the category key, so undo puts the file back into the
+    catalog and nothing is learned or forgotten. "Keep all" stores the hash in `duplicate_ignored`.
 
 ### 4h. Second opinion (`llm.py`, `llm_worker.py`)
 
@@ -517,6 +534,7 @@ One SQLite file. The main tables:
 | `examples` | example file (vector) | category_key (folder path or `__delete__`), relpath, mtime, origin (scan/applied/description), has_content, model, vector (float16), qvector (inbox-style, for training) |
 | `image_examples` | sorted picture (vector) | category_key, relpath, mtime, model, vector (§4c) |
 | `catalog` | file in a folder category | size, mtime, quick and full hash, for duplicates (§4g) |
+| `duplicate_ignored` | set of identical files kept as is | full hash (Duplicates page, §4g) |
 | `classifiers` | trained model | embedding model, category keys, coefficients, C, temperature (§4b) |
 | `label_features` | picture label set | cached text vectors of the label prompts, logit scale and bias (§4e) |
 
@@ -546,6 +564,7 @@ src/classifiles/
     applying.py          plan_apply, apply, undo, moves, batches, trash, duplicate_details
     learning.py          index builds (text, pictures, catalog), learning from applied files, retraining
     llm_steps.py         the language-model step of a scan (second opinion, name choice)
+    cleanup.py           Duplicates page: search, groups, keep one copy, folder pairs, keep as is
     helpers.py           skip lists, vector helpers; base.py declares the shared attributes for mypy
   taxonomy.py          build_categories(): roots' subfolders + manual entries + Delete; option_text()
   extract/             one extractor per family (pdf, office, text, image, archive, video) + ocr.py;
@@ -561,6 +580,7 @@ src/classifiles/
   naming.py            suggested file names; labels.py: what a picture shows; places.py: GPS → town
   batches.py           batch suggestions for Review
   duplicates.py        exact duplicates: catalog of the sorted folders, inbox check
+  cleanup.py           duplicates inside the sorted folders: search, groups, which copy to keep
   llm.py, llm_worker.py  local language model in its own process (second opinion, name choice)
   source.py            download source (Windows Zone.Identifier → domain)
   hf.py                load models from the Hugging Face cache: download once, then offline
@@ -571,7 +591,8 @@ src/classifiles/
 src/classifiles_api/
   app.py               create_app(): includes the routers, serves web/dist
   routes/              one router per area: settings · categories (+ rules, folder picker) · index ·
-                         scans (+ proposals, preview, open) · history (apply, quality, undo, trash)
+                         scans (+ proposals, preview, open) · history (apply, quality, undo, trash) ·
+                         duplicates (Duplicates page)
   models.py, deps.py   request bodies; service dependency, error mapping (guard), path stripping
   windows.py           open a file in Windows, list drives
 src/classifiles_cli/main.py  `classifiles` command (typer)
@@ -641,6 +662,15 @@ All endpoints are under `http://127.0.0.1:8765/api`. Interactive docs: `http://1
 | GET | `/quality?rerun=` | how right proposals were against your decisions (aggregates) |
 | GET | `/moves` | move journal |
 | POST | `/undo?batch_id=` | undo a batch (default: last) |
+| GET | `/duplicates?root=` | Duplicates page: summary, groups with suggestions, folder pairs, search status |
+| GET | `/duplicates/ignored?root=` | groups kept as they are |
+| GET / POST | `/duplicates/search` `{root?}` | search status / start a search (background) |
+| POST | `/duplicates/search/cancel` | stop the search |
+| POST | `/duplicates/resolve` `{decisions: [{hash, keep: [ids]}], root?}` | keep these copies, trash the others (one batch) |
+| POST | `/duplicates/resolve-suggested` `{root?, only_clear?}` | keep the suggested copy of every (clear) group |
+| POST | `/duplicates/resolve-folders` `{keep_folder, drop_folder, root?}` | keep one folder's copies, trash the other's |
+| POST | `/duplicates/ignore` `{hashes, ignored?}` | keep groups as they are / show them again |
+| POST | `/duplicates/{id}/open?reveal=` | open a copy in Windows / show it in Explorer |
 
 ## 10. Limitations
 

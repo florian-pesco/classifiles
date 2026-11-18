@@ -194,6 +194,9 @@ def _add_unversioned_columns(db: sqlite3.Connection) -> None:
 MIGRATIONS: list[str | Callable[[sqlite3.Connection], None]] = [
     _add_unversioned_columns,                                                 # 1
     "CREATE INDEX IF NOT EXISTS proposals_path ON proposals(path)",           # 2: "Only new", no full scan
+    # 3: Duplicates page: groups of identical files the user chose to keep as they are
+    "CREATE TABLE IF NOT EXISTS duplicate_ignored (full_hash TEXT PRIMARY KEY, created_at TEXT NOT NULL)",
+    "CREATE INDEX IF NOT EXISTS catalog_full_hash ON catalog(full_hash)",     # 4: duplicate groups by hash
 ]
 SCHEMA_VERSION = len(MIGRATIONS)
 

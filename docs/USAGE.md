@@ -154,8 +154,8 @@ A rule must target an existing, enabled category. Saving checks this.
 ## 5. Deleting files safely
 
 **Delete** is a built-in category. Files sent there are **not deleted right away**: they move into a
-hidden `.classifiles-trash` folder inside their inbox. That's fast, can be undone, and the folder is
-never scanned.
+hidden `.classifiles-trash` folder next to them (in the inbox, or in the sorted folder for duplicates
+from the Duplicates page). That's fast, can be undone, and the folder is never scanned or indexed.
 
 - **Undo** brings them back like any other change.
 - **History & trash → Empty trash…** deletes them permanently, after a confirmation. This cannot be
@@ -163,6 +163,25 @@ never scanned.
 - By default, only **rules** and **your own choice** send files to Delete. On the Categories page you can
   allow the model to suggest it too ("Let the model suggest Delete"). Then a good description helps,
   e.g. *installers, temporary or generated files, duplicates*.
+
+### Duplicates in your sorted folders
+
+The **Duplicates** page finds identical files (same content, any name) *inside* your sorted folders,
+for one root or for all categories, so each file ends up once, in its right place.
+
+1. **Find duplicates.** The search runs in the background at low priority and shows the time left.
+   Only files whose size occurs more than once are read. The first search reads them; later searches
+   only read new or changed files. Rough guide: a few minutes for tens of thousands of files.
+2. **Files** tab: one card per set of identical files. The suggested copy to keep is ticked, with the
+   reason: other names look like copies, its folder fits best (where the most similar sorted files
+   are), or simply the oldest. Tick another copy (or several), then **Trash N others**. **Keep all**
+   hides a set you want as it is (**Kept as is** tab, **Show again** brings it back).
+   Filter by *Clear suggestion* / *Needs a look* and by where the copies are.
+3. **Keep N clear suggestions…** decides every set whose suggestion is clear, after a confirmation.
+4. **Folders** tab: folders that share identical files, e.g. an old backup copy of a folder. Decide
+   once: **Keep A's copies** trashes the identical files in B (other files in B stay).
+
+Everything goes to the trash as one batch per action: **History & trash → Undo** restores it.
 
 ---
 
@@ -256,6 +275,8 @@ uv run classifiles apply --dry-run
 uv run classifiles apply
 uv run classifiles undo
 uv run classifiles prune --older-than 90      # remove undecided proposals of old scans (asks first)
+uv run classifiles duplicates --root /mnt/d/Archive          # find identical files in the sorted folders
+uv run classifiles duplicates --keep-suggested    # ...and trash the extra copies where the choice is clear (asks first)
 ```
 
 `--help` works on every command. Every command takes `-c / --config path.yaml`.
