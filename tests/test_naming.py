@@ -49,7 +49,8 @@ def test_dates():
     assert naming.pick_date("x", "Datum: 31.02.2024") == (None, "")  # impossible date
     assert naming.pick_date("x", "Stand März 2025")[0] == "2025-03"
     # an unlabelled text date loses against the creation date; undated documents never use text dates
-    assert naming.pick_date("x", "Lieferung 03.02.2024", "2024-02-10") == ("2024-02-10", "creation date (file metadata)")
+    created = naming.pick_date("x", "Lieferung 03.02.2024", "2024-02-10")
+    assert created == ("2024-02-10", "creation date (file metadata)")
     assert naming.pick_date("x", "Born 03.04.1990", None, dated=False) == (None, "")
 
 
@@ -148,7 +149,7 @@ def test_suggestion_follows_folder_changes(named, tree):
 
 def test_bulk_and_setting_default(named, tree):
     named.settings.use_suggested_names = True
-    scan_id, rows = named.scan(tree["inbox"])
+    _scan_id, rows = named.scan(tree["inbox"])
     r = _by(rows, "Rechnung (1).txt")
     assert r["new_name"] == r["suggested_name"]
     out = named.bulk_review([r["id"]], "accept", "Finance", "", use_suggested_name=False)
@@ -171,7 +172,7 @@ def test_api(named, tree, tmp_path):
     from classifiles_api.app import create_app
 
     client = TestClient(create_app(named, config_path=str(tmp_path / "cfg.yaml")))
-    scan_id, rows = named.scan(tree["inbox"])
+    _scan_id, rows = named.scan(tree["inbox"])
     r = _by(rows, "Rechnung (1).txt")
     p = client.patch(f"/api/proposals/{r['id']}", json={"action": "accept", "folder": "Finance", "subpath": "",
                                                          "use_suggested_name": True}).json()

@@ -11,6 +11,7 @@ Per-category settings (name, description, enabled, action) are looked up by path
 from __future__ import annotations
 
 import os
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
@@ -63,7 +64,7 @@ def build_categories(
     roots: list[dict],
     entries: list[dict],
     samples_per_folder: int = 3,
-    exclude_paths: list[str | Path] | None = None,
+    exclude_paths: Sequence[str | Path] | None = None,
     delete: dict | None = None,
 ) -> list[Category]:
     """All categories, including disabled and missing ones (the UI shows them; classification
@@ -151,13 +152,13 @@ def load_taxonomy(
     descriptions: dict[str, str] | None = None,
     exclude: list[str] | None = None,
     samples_per_folder: int = 3,
-    exclude_paths: list[str | Path] | None = None,
+    exclude_paths: Sequence[str | Path] | None = None,
 ) -> list[Category]:
     """Single-root convenience: usable folder categories under `root` (descriptions/exclude by name)."""
     root = Path(root).expanduser()
     if not root.is_dir():
         raise FileNotFoundError(f"Root does not exist: {root}")
-    entries = [{"path": str(root / n), "description": d} for n, d in (descriptions or {}).items()]
+    entries: list[dict] = [{"path": str(root / n), "description": d} for n, d in (descriptions or {}).items()]
     entries += [{"path": str(root / n), "enabled": False} for n in exclude or []]
     cats = build_categories([{"path": str(root)}], entries, samples_per_folder, exclude_paths)
     return [c for c in cats if c.usable]

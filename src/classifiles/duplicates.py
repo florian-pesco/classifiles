@@ -99,7 +99,8 @@ class Catalog:
         self._cancel.set()
 
     def count(self) -> int:
-        return self.store.one("SELECT COUNT(*) AS n FROM catalog")["n"]
+        row = self.store.one("SELECT COUNT(*) AS n FROM catalog")
+        return row["n"] if row else 0
 
     def build(self, categories: list[Category]) -> dict:
         """List every file of every usable folder category (incremental: unchanged files keep their
@@ -113,6 +114,7 @@ class Catalog:
             for i, c in enumerate(cats, 1):
                 if self._cancel.is_set():
                     break
+                assert c.path is not None
                 key = str(c.path)
                 keys.add(key)
                 self.status = {**self.status, "message": f"listing {c.name} ({i}/{len(cats)})"}
@@ -124,7 +126,7 @@ class Catalog:
             state = "cancelled" if self._cancel.is_set() else "done"
             self.status = {**self.status, "state": state, "message": state, "finished_at": now(),
                            "files": self.count()}
-        except Exception as e:  # noqa: BLE001 - shown in the UI
+        except Exception as e:
             log.exception("catalog build failed")
             self.status = {**self.status, "state": "failed", "error": str(e)[:500]}
         return self.status
@@ -236,7 +238,7 @@ def find_duplicates(inbox_files: list[Path], catalog: Catalog | None, labels: di
                 e.quick = quick_hash(e.path, e.size)
             except OSError:
                 return None
-            if e.catalog_id is not None:
+            if e.catalog_id is not None and catalog is not None:
                 catalog.cache_hashes(e.catalog_id, e.quick, None)
         return e.quick
 
@@ -246,7 +248,7 @@ def find_duplicates(inbox_files: list[Path], catalog: Catalog | None, labels: di
                 e.full = full_hash(e.path)
             except OSError:
                 return None
-            if e.catalog_id is not None:
+            if e.catalog_id is not None and catalog is not None:
                 catalog.cache_hashes(e.catalog_id, None, e.full)
         return e.full
 

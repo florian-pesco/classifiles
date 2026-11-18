@@ -6,8 +6,8 @@ existing files are most similar to it. Anything below the confidence threshold w
 Nothing changes on disk until you apply it, and everything can be undone.
 
 In the web UI, similar files are suggested as batches to review together, every decision you make is
-used right away for the other files of the same scan, and documents get a cleaner file name suggested
-(`Subject_Type_Detail`).
+used right away for the other files of the same scan, and files get a cleaner name suggested
+(documents `Subject_Type_Detail`, photos and videos a short title).
 
 ```
 inbox file ─► extract (name, type, metadata, text/OCR snippet)
@@ -39,10 +39,12 @@ Categories are the subfolders of one or more **roots**, plus any **manual** fold
 | Path | What |
 |---|---|
 | `src/classifiles/` | Core library, no web code. Use `ClassifilesService` from other apps (e.g. LifeOS). |
-| `src/classifiles/deciders/` | Pluggable decision backends: `laya` (local model), `keyword` (no model). |
-| `src/classifiles_api/` | Thin FastAPI layer over the service. It also serves the built web UI. |
+| `src/classifiles/service/` | `ClassifilesService`, one module per topic (scanning, reviewing, applying, learning, …). |
+| `src/classifiles/deciders/` | Decision backends: `examples` (learn from my folders), `laya`, `keyword` (no model). |
+| `src/classifiles_api/` | Thin FastAPI layer, one router per area. It also serves the built web UI. |
 | `src/classifiles_cli/` | `classifiles` command-line tool. |
 | `web/` | React + Vite review UI. |
+| `docs/` | Usage and architecture. |
 
 ## Setup
 
@@ -52,25 +54,22 @@ uv sync --extra all              # Python 3.12 venv incl. torch (CUDA), laya, OC
 uv run classifiles serve                 # then set up inbox + categories in the UI
 ```
 
-On first use the Laya model (~0.8 GB) is downloaded into the Hugging Face cache.
+The models are downloaded once into the Hugging Face cache when first needed (the embedding model
+when you first build the index), then everything runs offline.
 
 ## Use
 
-```bash
-uv run classifiles folders                    # what the model sees for each folder
-uv run classifiles scan                       # classify the first configured inbox
-uv run classifiles list --status needs_review
-uv run classifiles accept --suggested         # accept everything above threshold
-uv run classifiles accept 12 --to Finance     # override one
-uv run classifiles reject 13                  # leave it in the inbox
-uv run classifiles apply --dry-run            # show the moves
-uv run classifiles apply                      # move
-uv run classifiles undo                       # move the last batch back
+Open **http://127.0.0.1:8765** after `classifiles serve`: scan an inbox on the Review page, check the
+proposals, apply, undo if needed. The same works in the terminal:
 
-uv run classifiles serve                      # web UI on http://127.0.0.1:8765
+```bash
+uv run classifiles scan                       # classify the first configured inbox
+uv run classifiles accept --suggested         # accept everything above threshold
+uv run classifiles apply                      # move (--dry-run shows the moves first)
+uv run classifiles undo                       # move the last batch back
 ```
 
-For frontend development, run `classifiles serve` and `cd web && npm run dev` (Vite proxies `/api`).
+The full guide, including all CLI commands and development, is [docs/USAGE.md](docs/USAGE.md).
 
 ## Config
 
@@ -91,5 +90,17 @@ svc.apply(scan_id)
 ## Tests
 
 ```bash
-uv run pytest
+uv run pytest                    # tests
+uvx ruff check src tests         # lint
+uv run mypy                      # types
 ```
+
+## Contributing
+
+- **Ground rules:** local only (no file names, paths or contents leave the PC); gentle on the
+  hardware (bounded, cancellable, low-priority work, models unloaded when idle); every change to
+  files is reviewable before it happens and can be undone.
+- **One branch and one pull request per change.** PR titles follow `type(scope): title`, e.g.
+  `feat(naming): …`, `fix(duplicates): …`, `docs(usage): …`, `chore(ci): …`.
+- **Classification changes** include before/after numbers from `classifiles eval` (aggregates only).
+- **No personal data** in code, tests, commits or PRs: tests use synthetic files and invented names.

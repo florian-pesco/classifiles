@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import Any
 
 log = logging.getLogger(__name__)
 
@@ -15,17 +16,18 @@ def extract(path: Path, max_chars: int, ocr_pages: int = 0) -> tuple[str, dict]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
-    meta = {"pages": len(reader.pages)}
-    info = reader.metadata or {}
+    meta: dict[str, Any] = {"pages": len(reader.pages)}
+    info: Any = reader.metadata or {}
     if info.get("/Title"):
         meta["title"] = str(info["/Title"])
     if info.get("/Author"):
         meta["author"] = str(info["/Author"])
     try:
         created = reader.metadata.creation_date if reader.metadata else None
-    except Exception:  # noqa: BLE001 - malformed date strings are common
+    except Exception as e:  # noqa: BLE001 - pypdf raises anything on malformed dates
+        log.debug("no creation date: %s", e)
         created = None
-    if created and 1990 <= created.year:
+    if created and created.year >= 1990:
         meta["created"] = created.date().isoformat()
     chunks, total = [], 0
     for page in reader.pages[:3]:
@@ -57,7 +59,7 @@ def _ocr_pages(path: Path, pages: int, max_chars: int) -> str:
     out, total = [], 0
     try:
         doc = pdfium.PdfDocument(str(path))
-    except Exception as e:  # noqa: BLE001 - damaged PDFs are judged by name
+    except Exception as e:  # noqa: BLE001 - pdfium raises its own errors on broken files
         log.debug("cannot render %s: %s", path, e)
         return ""
     try:

@@ -58,7 +58,8 @@ def test_windows_paths_and_domains():
 def test_referrer_preferred_and_full_url_dropped():
     z = "[ZoneTransfer]\r\nZoneId=3\r\nReferrerUrl=https://www.lms.example.edu/x?id=1\r\nHostUrl=https://cdn.example.org/f.pdf\r\n"
     assert parse_zone_identifier(z) == "lms.example.edu"
-    assert parse_zone_identifier("[ZoneTransfer]\nZoneId=3\nHostUrl=https://files.example.org/a?token=s3cret") == "files.example.org"
+    note = "[ZoneTransfer]\nZoneId=3\nHostUrl=https://files.example.org/a?token=s3cret"
+    assert parse_zone_identifier(note) == "files.example.org"
     assert parse_zone_identifier("[ZoneTransfer]\nZoneId=3") is None
 
 
@@ -76,7 +77,7 @@ def test_download_sources_batches_and_tolerates_bad_output(monkeypatch):
         return json.dumps({p: "[ZoneTransfer]\nHostUrl=https://www.example.org/x" for p in paths if "dl" in p})
 
     files = [Path(f"/mnt/d/In/{n}.pdf") for n in ("dl1", "x", "dl2", "y", "dl3")]
-    got = download_sources(files + [Path("/tmp/local.pdf")], runner=fake)
+    got = download_sources([*files, Path("/tmp/local.pdf")], runner=fake)
     assert [len(c) for c in calls] == [2, 2, 1]  # the /tmp file is never sent
     assert got == {files[0]: "example.org", files[4]: "example.org"}  # batch 2 failed, skipped
 
@@ -87,7 +88,7 @@ def test_no_lookup_for_files_outside_windows_drives():
 
 def test_scan_adds_source_to_evidence_and_query(service, tree, monkeypatch):
     target = tree["inbox"] / "invoice_march.txt"
-    monkeypatch.setattr("classifiles.service.download_sources", lambda files: {target: "lms.example.edu"})
+    monkeypatch.setattr("classifiles.service.scanning.download_sources", lambda files: {target: "lms.example.edu"})
     _, rows = service.scan(tree["inbox"])
     r = next(r for r in rows if r["name"] == "invoice_march.txt")
     assert r["evidence"]["meta"]["source"] == "lms.example.edu"
@@ -99,7 +100,7 @@ def test_scan_adds_source_to_evidence_and_query(service, tree, monkeypatch):
 
 def test_source_lookup_can_be_switched_off(service, tree, monkeypatch):
     service.settings.use_download_source = False
-    monkeypatch.setattr("classifiles.service.download_sources", lambda files: pytest.fail("called"))
+    monkeypatch.setattr("classifiles.service.scanning.download_sources", lambda files: pytest.fail("called"))
     service.scan(tree["inbox"])
 
 
@@ -110,5 +111,6 @@ def test_settings_validation(service, tmp_path):
 
     client = TestClient(create_app(service, config_path=str(tmp_path / "cfg.yaml")))
     assert client.patch("/api/settings", json={"ocr_pdf_pages": 9}).status_code == 400
-    s = client.patch("/api/settings", json={"ocr_pdf_pages": 1, "ocr_images": False, "use_download_source": False}).json()
+    patch = {"ocr_pdf_pages": 1, "ocr_images": False, "use_download_source": False}
+    s = client.patch("/api/settings", json=patch).json()
     assert (s["ocr_pdf_pages"], s["ocr_images"], s["use_download_source"]) == (1, False, False)

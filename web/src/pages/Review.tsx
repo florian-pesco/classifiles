@@ -1,108 +1,48 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
-  api, humanSize, shortDate,
-  type Category, type PlannedMove, type Proposal, type ReviewAction, type ReviewBatch, type Scan, type Settings,
-  type Status,
+  api, shortDate,
+  type Category, type PlannedMove, type Proposal, type ReviewAction, type ReviewBatch, type Settings,
 } from '../api'
 import { ApplyDialog } from '../components/ApplyDialog'
 import { BatchPanel } from '../components/BatchPanel'
 import { BulkBar } from '../components/BulkBar'
-import { CategorySelect } from '../components/CategorySelect'
 import { CompareDuplicate } from '../components/CompareDuplicate'
 import { Icon } from '../components/Icon'
-import { kindIcon } from '../components/kindIcon'
 import { PageHead } from '../components/PageHead'
-import { NameEditor } from '../components/NameEditor'
-import { PathEditor } from '../components/PathEditor'
-import { PathInput } from '../components/FolderPicker'
 import { Preview } from '../components/Preview'
-import { STATUS_LABEL } from '../labels'
+import { useMessages } from '../messages'
+import { ProposalRow } from './review/ProposalRow'
+import { ScanBar } from './review/ScanBar'
+import { type Filter, SORTS, type SortKey } from './review/sort'
+import { StatusFilters } from './review/StatusFilters'
+import { useProposals } from './review/useProposals'
+import { useScan } from './review/useScan'
+import { useSelection } from './review/useSelection'
 
-const APPLIED_LABEL = { move: 'Moved', copy: 'Copied', delete: 'In trash' } as const
-type Filter = Status | 'all' | 'duplicates'
-const FILTERS: (Status | 'all')[] = ['all', 'needs_review', 'suggested', 'accepted', 'rejected', 'moved']
-
-type SortKey = 'confidence' | 'confidence_asc' | 'name' | 'category' | 'kind' | 'size' | 'modified'
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: 'confidence', label: 'Confidence ↓' },
-  { key: 'confidence_asc', label: 'Confidence ↑' },
-  { key: 'name', label: 'Name' },
-  { key: 'category', label: 'Category' },
-  { key: 'kind', label: 'File type' },
-  { key: 'size', label: 'Size' },
-  { key: 'modified', label: 'Modified (newest)' },
-]
-
-function sortRows(rows: Proposal[], key: SortKey) {
-  const r = [...rows]
-  const by = <T,>(f: (p: Proposal) => T, desc = false) =>
-    r.sort((a, b) => {
-      const x = f(a), y = f(b)
-      return (x < y ? -1 : x > y ? 1 : a.name.localeCompare(b.name)) * (desc ? -1 : 1)
-    })
-  switch (key) {
-    case 'confidence': return by(p => p.confidence, true)
-    case 'confidence_asc': return by(p => p.confidence)
-    case 'name': return by(p => p.name.toLowerCase())
-    case 'category': return by(p => p.final_target ?? '~')
-    case 'kind': return by(p => p.kind)
-    case 'size': return by(p => p.size, true)
-    case 'modified': return by(p => p.evidence.modified ?? '', true)
-  }
-}
-
-export function ReviewPage({ settings, categories, scanId, setScanId, notify, fail }: {
+export function ReviewPage({ settings, categories, scanId, setScanId }: {
   settings: Settings
   categories: Category[]
   scanId: number | null
   setScanId: (id: number | null) => void
-  notify: (m: string) => void
-  fail: (e: unknown) => void
 }) {
-  const [scans, setScans] = useState<Scan[]>([])
-  const [scan, setScan] = useState<Scan | null>(null)
-  const [proposals, setProposals] = useState<Proposal[]>([])
+  const { notify, fail } = useMessages()
   const [filter, setFilter] = useState<Filter>('all')
   const [search, setSearch] = useState('')
   const [sort, setSort] = useState<SortKey>('confidence')
-  const [inbox, setInbox] = useState(settings.inboxes[0] ?? '')
-  const [maxFiles, setMaxFiles] = useState(settings.max_files ? String(settings.max_files) : '')
-  const [onlyNew, setOnlyNew] = useState(false)
-  const [scanForm, setScanForm] = useState(false) // full scan options open (always open before the first scan)
+  const [batch, setBatch] = useState<ReviewBatch | null>(null) // list filtered to this batch
+  const [batches, setBatches] = useState<ReviewBatch[]>([])
   const [plan, setPlan] = useState<PlannedMove[] | null>(null)
   const [preview, setPreview] = useState<Proposal | null>(null)
   // Compare session: the duplicates to go through, fixed when the window opens (so decisions made
   // in it don't reshuffle the list), plus the one to start with.
   const [compare, setCompare] = useState<{ ids: number[]; start: number } | null>(null)
   const [busy, setBusy] = useState(false)
-  const [batches, setBatches] = useState<ReviewBatch[]>([])
-  const [batch, setBatch] = useState<ReviewBatch | null>(null) // list filtered to this batch
-  const [selected, setSelected] = useState<Set<number>>(new Set())
-  const lastClicked = useRef<number | null>(null)
-  // The list keeps its order while you decide: rows only re-sort (or leave the current filter) when you
-  // change the filter, search or sort, or the whole list is reloaded (new scan, accept all, apply, undo).
-  const [listVersion, setListVersion] = useState(0)
-  const frozen = useRef<{ key: string; ids: number[] } | null>(null)
-  const loadRows = (rows: Proposal[]) => { setProposals(rows); setListVersion(v => v + 1) }
 
-  const loadScans = useCallback(async () => {
-    const s = await api.scans()
-    setScans(s)
-    return s
-  }, [])
-
-  // Initial: list scans and open the latest unless a scan was chosen (e.g. from History).
-  useEffect(() => {
-    loadScans().then(s => { if (scanId == null && s[0]) setScanId(s[0].id) }).catch(fail)
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Load the chosen scan + its proposals.
-  useEffect(() => {
-    if (scanId == null) { setScan(null); setProposals([]); return }
-    Promise.all([api.scan(scanId), api.proposals(scanId)])
-      .then(([s, rows]) => { setScan(s); loadRows(rows) })
-      .catch(fail)
-  }, [scanId, fail])
+  const rows = useProposals({ scanId, filter, search, sort, batch })
+  const { proposals, setProposals, loadRows, merge, counts, visible } = rows
+  const { scans, scan, loadScans, startScan } = useScan(scanId, setScanId, rows)
+  const sel = useSelection(proposals, visible)
+  const { clear: clearSelection } = sel
 
   // Batch suggestions: refreshed whenever decisions change (debounced), not while scanning.
   const decisions = useMemo(() => proposals.map(p => `${p.id}:${p.status}:${p.final_target}`).join(','), [proposals])
@@ -112,24 +52,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     return () => clearTimeout(t)
   }, [scanId, scan?.status, decisions, fail])
   // A new scan starts without a batch filter or selection.
-  useEffect(() => { setBatch(null); setSelected(new Set()) }, [scanId])
-
-  // Poll while running.
-  useEffect(() => {
-    if (!scan || scan.status !== 'running') return
-    const t = setInterval(async () => {
-      try {
-        const s = await api.scan(scan.id)
-        setScan(s)
-        if (s.status !== 'running') {
-          clearInterval(t)
-          loadRows(await api.proposals(s.id))
-          loadScans()
-        }
-      } catch (e) { fail(e) }
-    }, 700)
-    return () => clearInterval(t)
-  }, [scan, fail, loadScans])
+  useEffect(() => { setBatch(null); clearSelection() }, [scanId, clearSelection])
 
   const duplicates = useMemo(() => proposals.filter(p => p.duplicate_of && p.status !== 'moved')
     .sort((a, b) => a.name.localeCompare(b.name)), [proposals])
@@ -145,80 +68,19 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
     () => (compare ? compare.ids.map(id => proposals.find(p => p.id === id)).filter((p): p is Proposal => !!p) : []),
     [compare, proposals])
 
-  const counts = useMemo(() => {
-    const c: Record<string, number> = { all: proposals.length, duplicates: 0 }
-    for (const p of proposals) {
-      c[p.status] = (c[p.status] ?? 0) + 1
-      if (p.duplicate_of) c.duplicates += 1
-    }
-    return c
-  }, [proposals])
-
-  const viewKey = `${scanId}|${filter}|${search}|${sort}|${batch?.id ?? ''}|${listVersion}`
-  const visible = useMemo(() => {
-    const byId = new Map(proposals.map(p => [p.id, p]))
-    if (frozen.current?.key === viewKey) {  // same view: keep the order, even if a row no longer matches
-      return frozen.current.ids.map(id => byId.get(id)).filter((p): p is Proposal => !!p)
-    }
-    const needle = search.trim().toLowerCase()
-    const inBatch = batch ? new Set(batch.ids) : null
-    const rows = sortRows(proposals.filter(p => (!inBatch || inBatch.has(p.id)) &&
-      (filter === 'all' || (filter === 'duplicates' ? !!p.duplicate_of : p.status === filter)) &&
-      (!needle || p.name.toLowerCase().includes(needle) || (p.final_target ?? '').toLowerCase().includes(needle))), sort)
-    if (rows.length || proposals.length) frozen.current = { key: viewKey, ids: rows.map(p => p.id) }
-    return rows
-  }, [proposals, viewKey, filter, search, sort, batch])
-
   const pickBatch = (b: ReviewBatch | null) => {
     setBatch(b)
-    setSelected(new Set())
+    clearSelection()
     if (b) setFilter('all')
   }
 
-  // Selection: click toggles one row, Shift+click selects the range from the last clicked row.
-  const toggle = (id: number, shift: boolean) => {
-    setSelected(sel => {
-      const next = new Set(sel)
-      const ids = visible.map(p => p.id)
-      const from = lastClicked.current == null ? -1 : ids.indexOf(lastClicked.current)
-      const to = ids.indexOf(id)
-      if (shift && from >= 0 && to >= 0) {
-        const on = !sel.has(id)
-        for (const x of ids.slice(Math.min(from, to), Math.max(from, to) + 1)) {
-          if (on) next.add(x); else next.delete(x)
-        }
-      } else if (next.has(id)) next.delete(id)
-      else next.add(id)
-      return next
-    })
-    lastClicked.current = id
-  }
-  const allVisibleSelected = visible.length > 0 && visible.every(p => selected.has(p.id))
-  const selectAllVisible = () => setSelected(allVisibleSelected ? new Set() : new Set(visible.map(p => p.id)))
-  const selectedRows = useMemo(() => proposals.filter(p => selected.has(p.id)), [proposals, selected])
-
-  // Merge updated proposals into the list, and say how many others followed the decision.
-  const merge = (updated: Proposal[]) => {
-    const by = new Map(updated.map(p => [p.id, p]))
-    setProposals(ps => ps.map(x => by.get(x.id) ?? x))
-  }
+  // Say how many other files followed a decision.
   const reportRelearned = (others: Proposal[]) => {
     if (!others.length) return
     const moved = others.filter(p => p.relearned).length
     notify(moved
       ? `Learned from your decision: ${moved} similar file${moved === 1 ? '' : 's'} updated (marked "updated").`
       : `${others.length} suggestion${others.length === 1 ? '' : 's'} went back to the model's own guess.`)
-  }
-
-  const startScan = async () => {
-    try {
-      const limit = parseInt(maxFiles, 10)
-      const s = await api.startScan(inbox || undefined, limit > 0 ? limit : undefined, onlyNew)
-      setProposals([])
-      setScan(s)
-      setScanId(s.id)
-      loadScans()
-    } catch (e) { fail(e) }
   }
 
   // Optimistic review: update the row immediately, roll back if the server refuses.
@@ -244,7 +106,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
   }
 
   const bulk = async (action: ReviewAction, folder?: string, subpath?: string, useSuggestedName?: boolean) => {
-    const ids = selectedRows.filter(p => p.status !== 'moved').map(p => p.id)
+    const ids = sel.selectedRows.filter(p => p.status !== 'moved').map(p => p.id)
     if (!ids.length) return
     setBusy(true)
     try {
@@ -256,7 +118,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
         + (res.errors.length ? `; ${res.errors.length} failed (${res.errors[0].error})` : '')
         + (res.relearned.filter(p => p.relearned).length
           ? `; ${res.relearned.filter(p => p.relearned).length} similar files updated from it.` : '.'))
-      setSelected(new Set())
+      clearSelection()
     } catch (e) { fail(e) } finally { setBusy(false) }
   }
 
@@ -320,82 +182,10 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
         </select>
       </PageHead>
 
-      <section className="card scan-card">
-        {scanForm || scans.length === 0 ? (
-          <div className="scanbar">
-            <PathInput value={inbox} onChange={setInbox} label="Inbox folder" placeholder="Inbox folder to scan" />
-            <input className="limit" type="number" min={1} value={maxFiles} placeholder="all"
-                   onChange={e => setMaxFiles(e.target.value)} aria-label="Maximum number of files"
-                   title="Classify at most this many files (newest first). Empty = all." />
-            <label className="check" title="Skip files already classified in an earlier scan">
-              <input type="checkbox" checked={onlyNew} onChange={e => setOnlyNew(e.target.checked)} /> Only new
-            </label>
-            <button className="primary" onClick={() => { setScanForm(false); startScan() }} disabled={running}>
-              <Icon name="scan" size={16} />{running ? 'Scanning…' : 'Scan & classify'}
-            </button>
-          </div>
-        ) : (
-          <div className="scanbar compact">
-            <Icon name="inbox" className="muted" />
-            <span className="grow scan-summary" title={inbox}>
-              <b>{inbox.split('/').filter(Boolean).pop() || 'Inbox'}</b>
-              <span className="muted small"> {maxFiles ? `· newest ${maxFiles}` : '· all files'}{onlyNew ? ' · only new' : ''}</span>
-            </span>
-            <button className="ghost" onClick={() => setScanForm(true)}>Change</button>
-            <button className="primary" onClick={startScan} disabled={running}>
-              <Icon name="scan" size={16} />{running ? 'Scanning…' : 'Scan & classify'}
-            </button>
-          </div>
-        )}
-        {running && (scan?.phase === 'second_opinion' || scan?.phase === 'naming') && (
-          <div className="row-form so-progress">
-            <div className="progress grow" role="progressbar" aria-valuenow={scan.llm_done} aria-valuemax={scan.llm_total}>
-              <div style={{ width: `${scan.llm_total ? (100 * scan.llm_done) / scan.llm_total : 0}%` }} />
-              <span>
-                {scan.llm_done === 0 ? 'Starting the language model (first time: one-time download)…'
-                  : scan.phase === 'naming'
-                    ? `Choosing file names: ${scan.llm_done} / ${scan.llm_total}`
-                    : `Second opinion on unsure files: ${scan.llm_done} / ${scan.llm_total}`}
-              </span>
-            </div>
-            <button onClick={() => api.cancelSecondOpinion().catch(fail)}>Skip</button>
-          </div>
-        )}
-        {scan?.llm_error && <div className="banner error">Language model stopped: {scan.llm_error}</div>}
-        {running && scan && scan.phase !== 'second_opinion' && scan.phase !== 'naming' && (
-          <div className="progress" role="progressbar" aria-valuenow={scan.processed} aria-valuemax={scan.total}>
-            <div style={{ width: `${scan.total ? (100 * scan.processed) / scan.total : 0}%` }} />
-            <span>{scan.processed} / {scan.total} files
-              {scan.total < scan.inbox_total ? ` (of ${scan.inbox_total} in inbox)` : ''}</span>
-          </div>
-        )}
-        {scan?.status === 'failed' && <div className="banner error">Scan failed: {scan.error}</div>}
-      </section>
+      <ScanBar settings={settings} scan={scan} hasScans={scans.length > 0} onStart={startScan} />
 
-      <nav className="filters" aria-label="Filter by status">
-        <div className="seg">
-          {FILTERS.map(f => (
-            <button key={f} className={f === filter ? 'active' : ''} aria-pressed={f === filter}
-                    onClick={() => (f === filter ? setListVersion(v => v + 1) : setFilter(f))}
-                    title={f === filter ? 'Click again to re-sort the list' : undefined}>
-              {f === 'all' ? 'All' : STATUS_LABEL[f]}<span className="count">{counts[f] ?? 0}</span>
-            </button>
-          ))}
-        </div>
-        {counts.duplicates > 0 && (
-          <>
-            <button className={filter === 'duplicates' ? 'chip active' : 'chip dup-chip'} onClick={() => setFilter('duplicates')}>
-              Duplicates <span className="count">{counts.duplicates}</span>
-            </button>
-            {undecidedDuplicates.length > 0 && (
-              <button className="chip dup-chip" onClick={() => openCompare()}
-                      title="Go through the undecided duplicates one by one with a side-by-side comparison">
-                Review duplicates ({undecidedDuplicates.length}) →
-              </button>
-            )}
-          </>
-        )}
-      </nav>
+      <StatusFilters filter={filter} setFilter={setFilter} counts={counts} onResort={rows.resort}
+                     undecidedDuplicates={undecidedDuplicates.length} onCompare={() => openCompare()} />
 
       <div className="toolbar">
         <label className="searchbox">
@@ -413,7 +203,7 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       {(batch || visible.length > 0) && (
         <div className="select-line small">
           <label className="check">
-            <input type="checkbox" checked={allVisibleSelected} onChange={selectAllVisible} disabled={!visible.length} />
+            <input type="checkbox" checked={sel.allVisibleSelected} onChange={sel.selectAllVisible} disabled={!visible.length} />
             Select all {visible.length} shown
           </label>
           {batch && (
@@ -434,15 +224,15 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
       <ul className="list">
         {visible.map(p => (
           <ProposalRow key={p.id} p={p} categories={categories} threshold={threshold}
-                       selected={selected.has(p.id)} onSelect={shift => toggle(p.id, shift)}
+                       selected={sel.selected.has(p.id)} onSelect={shift => sel.toggle(p.id, shift)}
                        onCompare={() => openCompare(p.id)}
                        onReview={review} onPreview={() => setPreview(p)} />
         ))}
       </ul>
 
-      {selectedRows.length > 0 ? (
+      {sel.selectedRows.length > 0 ? (
         <footer className="actions bulk">
-          <BulkBar selected={selectedRows} categories={categories} onAction={bulk} onClear={() => setSelected(new Set())} />
+          <BulkBar selected={sel.selectedRows} categories={categories} onAction={bulk} onClear={clearSelection} />
         </footer>
       ) : (
         <footer className="actions">
@@ -469,140 +259,5 @@ export function ReviewPage({ settings, categories, scanId, setScanId, notify, fa
 
       {plan && <ApplyDialog plan={plan} busy={busy} onCancel={() => setPlan(null)} onApply={confirmApply} />}
     </div>
-  )
-}
-
-function ProposalRow({ p, categories, threshold, selected, onSelect, onReview, onPreview, onCompare }: {
-  p: Proposal
-  categories: Category[]
-  threshold: number
-  selected: boolean
-  onSelect: (shift: boolean) => void
-  onReview: (p: Proposal, action: ReviewAction, folder?: string, subpath?: string,
-             name?: string, useSuggestedName?: boolean) => void
-  onPreview: () => void
-  onCompare: () => void
-}) {
-  const cat = categories.find(c => c.name === p.final_target)
-  const [open, setOpen] = useState(false)
-  const done = p.status === 'moved'
-  const confClass = p.confidence >= threshold ? 'high' : p.confidence >= threshold / 2 ? 'mid' : 'low'
-  const looks = p.evidence.meta?.looks_like as string | undefined
-  const source = p.evidence.meta?.source as string | undefined
-  const viaOcr = String(p.evidence.meta?.note ?? '').startsWith('text read by OCR')
-  const llmAgrees = !!p.llm_choice && p.llm_choice === p.final_target
-  const statusLabel = done && p.applied_action ? APPLIED_LABEL[p.applied_action] : STATUS_LABEL[p.status]
-  const showName = cat && cat.source !== 'delete' && !p.duplicate_of && (p.suggested_name || p.new_name)
-
-  return (
-    <li className={`row status-${p.status}${p.duplicate_of ? ' is-dup' : ''}${selected ? ' selected' : ''}`}>
-      <input type="checkbox" className="pick" checked={selected} aria-label={`Select ${p.name}`}
-             onChange={() => undefined} onClick={e => onSelect(e.shiftKey)} />
-      <div className="kind-ico" title={p.kind}><Icon name={kindIcon(p.kind)} /></div>
-      <div className="file">
-        <div className="file-name">
-          <button className="linkish name" onClick={() => setOpen(o => !o)} aria-expanded={open} title={p.name}>{p.name}</button>
-          {p.relearned === 1 && !done && (
-            <span className="badge learned plain"
-                  title="Changed by a decision you made in this scan: a similar file you sorted moved this suggestion. Open details to see which.">
-              <Icon name="learn" size={12} />updated
-            </span>
-          )}
-        </div>
-        <div className="meta">
-          <span>{p.kind}{looks ? ` · ${looks}` : ''}</span>
-          <span>{humanSize(p.size)}</span>
-          <span>{p.evidence.modified?.slice(0, 10)}</span>
-          {source && <span title="Where it was downloaded from">from {source}</span>}
-          {viaOcr && <span title="Text read by OCR (scanned PDF)">OCR</span>}
-          <button className="linkish toggle-details" onClick={() => setOpen(o => !o)} aria-expanded={open}>
-            <Icon name="chevron" size={13} />details
-          </button>
-          <button className="linkish" onClick={onPreview}>preview</button>
-        </div>
-      </div>
-
-      <div className="conf" title={`${p.source}: ${(p.confidence * 100).toFixed(0)}%`}>
-        <div className="conf-top"><span>{(p.confidence * 100).toFixed(0)}%</span>{p.source === 'rule' && <span>rule</span>}</div>
-        <div className="bar"><div className={confClass} style={{ width: `${p.confidence * 100}%` }} /></div>
-      </div>
-
-      <CategorySelect value={p.final_target} categories={categories} disabled={done}
-                      onChange={name => name && onReview(p, 'accept', name)} label={`Category for ${p.name}`} />
-
-      <span className={`badge status ${p.status}`}>{statusLabel}</span>
-
-      <div className="rowbtns">
-        {!done && p.status !== 'accepted' && (
-          <button className="icon ok" onClick={() => onReview(p, 'accept')} disabled={!p.final_target} title="Accept" aria-label="Accept">
-            <Icon name="check" />
-          </button>
-        )}
-        {!done && p.status !== 'rejected' && (
-          <button className="icon no" onClick={() => onReview(p, 'reject')} title="Keep in inbox" aria-label="Keep in inbox">
-            <Icon name="x" />
-          </button>
-        )}
-        {!done && (p.status === 'accepted' || p.status === 'rejected') && (
-          <button className="icon" onClick={() => onReview(p, 'reset')} title="Reset" aria-label="Reset"><Icon name="undo" /></button>
-        )}
-      </div>
-
-      <div className="row-sub">
-        {p.duplicate_of && (
-          <div className="dup-line">
-            <span className="dup-label">
-              <Icon name="copy" size={15} />
-              {p.duplicate_kind === 'sorted' ? 'Identical file already in your folders:' : 'Identical file also in the inbox:'}
-            </span>
-            <span className="mono dup-path" title={p.duplicate_of}>{p.duplicate_of}</span>
-            <button className="compare-btn" onClick={onCompare}>Compare</button>
-          </div>
-        )}
-        {cat && cat.source !== 'delete' && (
-          <PathEditor category={cat.name} subpath={p.subpath ?? ''} suggested={p.suggested_subpath ?? ''}
-                      newFolder={p.new_folder} disabled={done}
-                      onChange={sub => onReview(p, 'accept', p.final_target ?? undefined, sub)} />
-        )}
-        {showName && (
-          <NameEditor original={p.name} suggested={p.suggested_name} current={p.new_name} reason={p.name_reason}
-                      disabled={done}
-                      onUse={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, true)}
-                      onKeep={() => onReview(p, 'accept', p.final_target ?? undefined, undefined, undefined, false)}
-                      onSet={n => onReview(p, 'accept', p.final_target ?? undefined, undefined, n)} />
-        )}
-        {p.llm_choice && (
-          <div className="second-opinion small">
-            {llmAgrees
-              ? <span className="badge so-agree" title="The language model chose the same category">both agree</span>
-              : (
-                <>
-                  <span className="badge so-differ" title="The language model chose a different category">2nd opinion: {p.llm_choice}</span>
-                  {!done && <button className="linkish" onClick={() => onReview(p, 'accept', p.llm_choice!)}>use it</button>}
-                </>
-              )}
-          </div>
-        )}
-      </div>
-
-      {open && (
-        <dl className="details">
-          {p.reason && <><dt>Why</dt><dd>{p.reason}</dd></>}
-          {p.alternatives.length > 0 && (
-            <><dt>Scores</dt><dd>{p.alternatives.map(a => `${a.folder} ${(a.probability * 100).toFixed(0)}%`).join(' · ')}</dd></>
-          )}
-          {p.name_reason && p.suggested_name && (
-            <><dt>Name</dt><dd><span className="mono">{p.suggested_name}</span>: {p.name_reason}</dd></>
-          )}
-          {done && p.applied_dst && <><dt>Now at</dt><dd className="mono">{p.applied_dst}</dd></>}
-          <dt>Content</dt>
-          <dd>
-            {p.evidence.text
-              ? <div className="snippet">{p.evidence.text.slice(0, 400)}</div>
-              : <span className="warn-text">No readable content: judged by file name and type only.</span>}
-          </dd>
-        </dl>
-      )}
-    </li>
   )
 }

@@ -90,7 +90,7 @@ def choose_C(X: np.ndarray, y: list[str], weights: np.ndarray | None = None, gri
             per = [np.mean(pred[y_arr[test] == k] == k) for k in set(y_arr[test])]
             recalls.append(float(np.mean(per)))
         scores[C] = float(np.mean(recalls))
-    return max(scores, key=scores.get), scores
+    return max(scores, key=scores.__getitem__), scores
 
 
 T_GRID = (0.25, 0.35, 0.5, 0.7, 1.0, 1.4, 2.0)

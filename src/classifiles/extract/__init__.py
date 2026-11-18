@@ -4,16 +4,17 @@ from __future__ import annotations
 
 import logging
 import mimetypes
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
 
-from .base import Evidence, kind_of
 from . import archive, image, office, pdf, text, video
+from .base import Evidence, kind_of
 
 log = logging.getLogger(__name__)
 
-# kind -> extractor(path, max_chars) -> (text, meta)
-_EXTRACTORS = {
+# kind -> extractor(path, max_chars, ...) -> (text, meta); pdf and image take one more option
+_EXTRACTORS: dict[str, Callable[..., tuple[str, dict]]] = {
     "pdf": pdf.extract,
     "document": office.extract,
     "spreadsheet": office.extract,
@@ -51,7 +52,7 @@ def extract(path: str | Path, max_chars: int = 1500, ocr_pdf_pages: int = 0, ocr
                 ev.text, ev.meta = fn(path, max_chars, ocr_images)
             else:
                 ev.text, ev.meta = fn(path, max_chars)
-        except Exception as e:  # a broken file must never stop a scan
+        except Exception as e:  # noqa: BLE001 - a broken file must never stop a scan
             log.debug("extract failed for %s: %s", path, e)
             ev.meta["extract_error"] = str(e)[:200]
     ev.text = " ".join(ev.text.split())[:max_chars]

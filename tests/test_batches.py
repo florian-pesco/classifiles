@@ -4,7 +4,6 @@ import numpy as np
 import pytest
 
 from classifiles.batches import find_batches, name_pattern
-from test_examples import FakeEmbedder, ex_service, sorted_tree  # noqa: F401 - fixtures
 
 
 def test_name_pattern():
@@ -114,7 +113,7 @@ def test_batches_and_bulk_api(unsure_scan, tmp_path):
     assert name["title"] == "zebra_quarterly_‹n›.txt" and name["undecided"] == 4
 
     ids = name["ids"][:2]
-    r = client.post("/api/proposals/bulk", json={"ids": ids + [999999], "action": "accept",
+    r = client.post("/api/proposals/bulk", json={"ids": [*ids, 999999], "action": "accept",
                                                   "folder": "Work", "subpath": "meetings"}).json()
     assert {p["id"] for p in r["updated"]} == set(ids) and r["errors"][0]["proposal_id"] == 999999
     assert {p["id"] for p in r["relearned"]} == set(name["ids"][2:])

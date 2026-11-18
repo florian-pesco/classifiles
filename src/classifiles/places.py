@@ -64,7 +64,8 @@ class Places:
         """Name of the nearest town within max_km, or None (also if the list can't be loaded)."""
         try:
             la, lo, names = self._load()
-        except Exception as e:  # noqa: BLE001 - offline or blocked: names just get no place
+        except Exception as e:  # noqa: BLE001 - download or file problems: no town, no failed scan
+            log.debug("town list unavailable: %s", e)
             self.error = str(e)[:200]
             return None
         p, q = np.radians(lat), np.radians(lon)

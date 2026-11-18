@@ -215,7 +215,6 @@ export interface Batch {
   undoable: number
 }
 
-export interface TrashItem { id: number; src: string; dst: string; moved_at: string; size: number | null }
 
 export interface DuplicateSide {
   label: string
@@ -234,7 +233,52 @@ export interface DuplicateDetails {
   method: string
 }
 
+export interface Move {
+  id: number
+  batch_id: string
+  proposal_id: number | null
+  src: string
+  dst: string
+  action: Action
+  category_key: string | null
+  created_dir: string | null
+  moved_at: string
+  undone_at: string | null
+  purged_at: string | null
+}
+
+/** A file in the trash: its delete move, plus the size now (null: no longer there). */
+export type TrashItem = Move & { size: number | null }
+
 export interface FsListing { path: string | null; parent: string | null; dirs: string[]; shortcuts: string[] }
+export interface SubfolderListing { path: string; dirs: string[]; exists?: boolean }
+
+export interface RulesPayload { rules: Rule[]; kinds: string[] }
+export interface LearnPastResult { learned: number; by_action: Record<string, number> }
+export type ReviewResult = Proposal & { relearned_others: Proposal[] }
+export interface BulkReviewResult {
+  updated: Proposal[]
+  errors: { proposal_id: number; error: string }[]
+  relearned: Proposal[]
+}
+export interface UndoResult {
+  batch_id: string | null
+  restored: { move_id: number; path: string }[]
+  errors: { move_id: number; error: string }[]
+}
+export interface EmptyTrashResult { purged: number; errors: { move_id: number; error: string }[] }
+export interface Ok { ok: boolean }
+
+/** A failed request: `message` is the server's explanation (FastAPI `detail`), `status` the HTTP status. */
+export class ApiError extends Error {
+  readonly status: number
+
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
 
 async function call<T>(method: string, url: string, body?: unknown): Promise<T> {
   const res = await fetch(url, {
@@ -245,7 +289,7 @@ async function call<T>(method: string, url: string, body?: unknown): Promise<T> 
   if (!res.ok) {
     let detail = res.statusText
     try { detail = (await res.json()).detail ?? detail } catch { /* not JSON */ }
-    throw new Error(typeof detail === 'string' ? detail : JSON.stringify(detail))
+    throw new ApiError(res.status, typeof detail === 'string' ? detail : JSON.stringify(detail))
   }
   return res.json() as Promise<T>
 }
@@ -263,19 +307,19 @@ export const api = {
   categories: (refresh = false) => call<CategoriesPayload>('GET', `/api/categories?${q({ refresh })}`),
   saveCategories: (roots: { path: string }[], categories: CategoryEntry[], del: DeleteSettings) =>
     call<CategoriesPayload>('PUT', '/api/categories', { roots, categories, delete: del }),
-  rules: () => call<{ rules: Rule[]; kinds: string[] }>('GET', '/api/rules'),
-  saveRules: (rules: Rule[]) => call<{ rules: Rule[]; kinds: string[] }>('PUT', '/api/rules', { rules }),
+  rules: () => call<RulesPayload>('GET', '/api/rules'),
+  saveRules: (rules: Rule[]) => call<RulesPayload>('PUT', '/api/rules', { rules }),
 
   index: () => call<IndexStatus>('GET', '/api/index'),
   buildIndex: () => call<IndexStatus>('POST', '/api/index/build'),
   cancelIndex: () => call<IndexStatus>('POST', '/api/index/cancel'),
   retrain: () => call<IndexStatus['trained']>('POST', '/api/index/retrain'),
-  learnPast: () => call<{ learned: number; by_action: Record<string, number> }>('POST', '/api/index/learn-past'),
+  learnPast: () => call<LearnPastResult>('POST', '/api/index/learn-past'),
 
   browse: (path?: string) => call<FsListing>('GET', `/api/fs?${q({ path })}`),
 
   scans: () => call<Scan[]>('GET', '/api/scans'),
-  cancelSecondOpinion: () => call<{ ok: boolean }>('POST', '/api/scans/second-opinion/cancel'),
+  cancelSecondOpinion: () => call<Ok>('POST', '/api/scans/second-opinion/cancel'),
   scan: (id: number) => call<Scan>('GET', `/api/scans/${id}`),
   startScan: (inbox: string | undefined, maxFiles: number | undefined, onlyNew: boolean) =>
     call<Scan>('POST', '/api/scans', { inbox, max_files: maxFiles ?? 0, only_new: onlyNew }),
@@ -283,30 +327,28 @@ export const api = {
   proposals: (scanId: number) => call<Proposal[]>('GET', `/api/proposals?${q({ scan_id: scanId })}`),
   review: (id: number, action: ReviewAction, folder?: string, subpath?: string,
            name?: string, useSuggestedName?: boolean) =>
-    call<Proposal & { relearned_others: Proposal[] }>('PATCH', `/api/proposals/${id}`,
+    call<ReviewResult>('PATCH', `/api/proposals/${id}`,
       { action, folder, subpath, name, use_suggested_name: useSuggestedName }),
   bulkReview: (ids: number[], action: ReviewAction, folder?: string, subpath?: string, useSuggestedName?: boolean) =>
-    call<{ updated: Proposal[]; errors: { proposal_id: number; error: string }[]; relearned: Proposal[] }>(
-      'POST', '/api/proposals/bulk', { ids, action, folder, subpath, use_suggested_name: useSuggestedName }),
+    call<BulkReviewResult>('POST', '/api/proposals/bulk', { ids, action, folder, subpath, use_suggested_name: useSuggestedName }),
   reviewBatches: (scanId: number) => call<ReviewBatch[]>('GET', `/api/scans/${scanId}/batches`),
   acceptSuggested: (scanId: number, topLevel = false) =>
     call<{ accepted: number }>('POST', '/api/proposals/accept-suggested', { scan_id: scanId, top_level: topLevel }),
   subfolders: (category: string, path = '') =>
-    call<{ path: string; dirs: string[]; exists?: boolean }>('GET', `/api/categories/subfolders?${q({ category, path })}`),
+    call<SubfolderListing>('GET', `/api/categories/subfolders?${q({ category, path })}`),
   fileUrl: (id: number) => `/api/proposals/${id}/file`,
   duplicateDetails: (id: number) => call<DuplicateDetails>('GET', `/api/proposals/${id}/duplicate`),
   openFile: (id: number, reveal = false, duplicate = false) =>
-    call<{ ok: boolean }>('POST', `/api/proposals/${id}/open?${q({ reveal, duplicate })}`),
+    call<Ok>('POST', `/api/proposals/${id}/open?${q({ reveal, duplicate })}`),
 
   planApply: (scanId: number) => call<PlannedMove[]>('POST', '/api/apply/plan', { scan_id: scanId }),
   apply: (scanId: number) => call<ApplyResult>('POST', '/api/apply', { scan_id: scanId }),
   batches: () => call<Batch[]>('GET', '/api/batches'),
   quality: (rerun = false) => call<Quality>('GET', `/api/quality?${q({ rerun })}`),
-  undo: (batchId?: string) =>
-    call<{ batch_id: string | null; restored: unknown[]; errors: { error: string }[] }>(
-      'POST', `/api/undo?${q({ batch_id: batchId })}`),
+  moves: () => call<Move[]>('GET', '/api/moves'),
+  undo: (batchId?: string) => call<UndoResult>('POST', `/api/undo?${q({ batch_id: batchId })}`),
   trash: () => call<TrashItem[]>('GET', '/api/trash'),
-  emptyTrash: () => call<{ purged: number; errors: { error: string }[] }>('POST', '/api/trash/empty'),
+  emptyTrash: () => call<EmptyTrashResult>('POST', '/api/trash/empty'),
 }
 
 export function humanSize(n: number | null | undefined) {

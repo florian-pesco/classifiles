@@ -26,6 +26,7 @@ from __future__ import annotations
 import os
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
+from typing import ClassVar
 
 import yaml
 
@@ -109,7 +110,22 @@ class Settings:
     llm_rotations: int = 3              # ask with rotated option orders and average (removes letter bias)
     db_path: str = str(DATA_DIR / "classifiles.db")
 
+    # Allowed ranges of numeric settings (checked on load, in the API and in the CLI).
+    RANGES: ClassVar[dict[str, tuple[float, float]]] = {
+        "threshold": (0, 1), "image_weight": (0, 1), "trained_weight": (0, 1),
+        "gpu_memory_fraction": (0.05, 0.9), "llm_gpu_fraction": (0.05, 0.95),
+        "ocr_pdf_pages": (0, 5), "llm_max_files": (1, 1000), "llm_rotations": (1, 6),
+    }
+
+    def validate(self) -> None:
+        """Raise ValueError if a numeric setting is out of range."""
+        for name, (lo, hi) in self.RANGES.items():
+            value = getattr(self, name)
+            if not lo <= value <= hi:
+                raise ValueError(f"{name} must be between {lo:g} and {hi:g}")
+
     def __post_init__(self):
+        self.validate()
         self.roots = [{"path": r} if isinstance(r, str) else dict(r) for r in self.roots]
         for c in self.categories:
             unknown = set(c) - CATEGORY_KEYS
@@ -119,7 +135,7 @@ class Settings:
                 raise ValueError(f"Category action must be one of {ACTIONS}: {c}")
 
     @classmethod
-    def load(cls, path: str | Path | None = None) -> "Settings":
+    def load(cls, path: str | Path | None = None) -> Settings:
         if path is not None and not Path(path).exists():
             raise FileNotFoundError(f"Config file not found: {path}")
         path = Path(path) if path else DEFAULT_CONFIG_PATH
@@ -128,7 +144,7 @@ class Settings:
         return cls.from_dict(yaml.safe_load(path.read_text()) or {}, source=str(path))
 
     @classmethod
-    def from_dict(cls, data: dict, source: str = "config") -> "Settings":
+    def from_dict(cls, data: dict, source: str = "config") -> Settings:
         data = _upgrade_legacy(dict(data))
         known = {f.name for f in fields(cls)}
         unknown = set(data) - known

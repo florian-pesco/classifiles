@@ -43,13 +43,11 @@ class Embedder:
             torch.cuda.set_per_process_memory_fraction(self.gpu_memory_fraction)
         from sentence_transformers import SentenceTransformer
 
+        from .hf import load_pretrained
+
         kwargs = {"torch_dtype": torch.float16} if device == "cuda" else {}
-        try:  # offline first: after the one-time download nothing touches the network
-            model = SentenceTransformer(self.model_name, device=device, model_kwargs=kwargs, local_files_only=True)
-        except Exception:
-            log.info("Downloading embedding model %s (one time)", self.model_name)
-            model = SentenceTransformer(self.model_name, device=device, model_kwargs=kwargs)
-        os.environ["HF_HUB_OFFLINE"] = "1"
+        model = load_pretrained(SentenceTransformer, self.model_name, "embedding model", device=device,
+                                model_kwargs=kwargs)
         model.max_seq_length = self.max_seq_length
         return model
 

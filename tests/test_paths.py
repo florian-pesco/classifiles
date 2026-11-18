@@ -4,10 +4,7 @@ import numpy as np
 import pytest
 
 from classifiles.mover import MoveError, plan_move
-from classifiles.paths import (name_tokens, normalize_subpath, split_existing, suggest_folder_name,
-                               suggest_subpath)
-from test_examples import FakeEmbedder  # noqa: F401  (fixtures below reuse its setup)
-from test_examples import ex_service, sorted_tree  # noqa: F401
+from classifiles.paths import name_tokens, normalize_subpath, split_existing, suggest_folder_name, suggest_subpath
 
 
 def n(cat, d, w):
@@ -29,7 +26,7 @@ def test_spread_children_mark_a_container():
 
 def test_top_level_when_no_folder_has_a_majority():
     nb = [n("Studies", "A", 1), n("Studies", "B", 1), n("Studies", "", 1)]
-    sub, container = suggest_subpath(nb, "Studies")
+    sub, _container = suggest_subpath(nb, "Studies")
     assert sub == ""
 
 
@@ -53,9 +50,7 @@ def test_normalize_and_split(tmp_path):
     assert split_existing(tmp_path, "A/New/Deeper") == ("A", ["New", "Deeper"])
 
 
-def test_scan_suggests_subfolder_and_apply_uses_it(ex_service, sorted_tree, monkeypatch):
-    monkeypatch.setattr("classifiles.service.threading.Thread",
-                        lambda target, daemon: type("T", (), {"start": lambda self: target()})())
+def test_scan_suggests_subfolder_and_apply_uses_it(ex_service, sorted_tree, monkeypatch, sync_background):
     ex_service.example_index().build(ex_service.categories(refresh=True))
     (sorted_tree["inbox"] / "invoice_april.txt").write_text("invoice april")
     scan_id, rows = ex_service.scan(sorted_tree["inbox"])
